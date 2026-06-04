@@ -1,8 +1,25 @@
 // ========== 基础实体 ==========
+export interface ProductLine {
+  id: number;
+  name: string;
+  isActive: boolean;
+}
+
+export interface GlobalPreset {
+  defaultMajorSectionIds: number[];
+  defaultMinorSectionIds: number[];
+  defaultStationTypeIds: number[];
+  defaultComponentIds: number[];
+  defaultTypeIds: number[];
+  defaultLocationIds: number[];
+  defaultDefectIds: number[];
+}
+
 export interface Product {
   id: number;
   code: string;
   status: 'active' | 'inactive';
+  productLineId?: number;
 }
 
 export interface Station {

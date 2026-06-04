@@ -8,7 +8,7 @@ const { Title } = Typography;
 const { RangePicker } = DatePicker;
 
 interface StationFpyRow {
-  stationId: number; stationName: string; majorSection: string; minorSection: string;
+  stationId: number; stationName: string; majorSection: string; minorSection: string; stationType: string;
   totalOutput: number; appearanceDefects: number; functionalDefects: number; airLeakDefects: number;
   appearanceFpy: number; functionalFpy: number; airLeakFpy: number;
 }
@@ -19,10 +19,13 @@ export default function StationFpyList() {
   const [dates, setDates] = useState<[string, string] | null>(['2026-06-01', '2026-06-03']);
   const [productIds, setProductIds] = useState<number[]>(activeProductIds);
 
-  const data = useMemo(() => {
+  const allData = useMemo(() => {
     if (productIds.length === 0) return [];
     return getStationFpy(productIds, dates?.[0], dates?.[1]);
   }, [productIds, dates]);
+
+  const fqcData = useMemo(() => allData.filter(d => d.stationType === 'FQC'), [allData]);
+  const stationData = useMemo(() => allData.filter(d => d.stationType !== 'FQC'), [allData]);
 
   const columns: ColumnsType<StationFpyRow> = [
     { title: '工站', dataIndex: 'stationName', key: 'sn', width: 120, sorter: (a, b) => a.stationName.localeCompare(b.stationName) },
@@ -62,10 +65,16 @@ export default function StationFpyList() {
             onChange={(_d, ds) => setDates(ds?.[0] && ds?.[1] ? [ds[0], ds[1]] : null)} />
         </Space>
       </Card>
-      <Card title={`工站 FPY 明细 (${data.length} 个工站)`}>
-        <Table dataSource={data.map((d, i) => ({ ...d, key: i }))} columns={columns}
+      <Card title={`工站 FPY 明细 (${stationData.length} 个工站)`}>
+        <Table dataSource={stationData.map((d, i) => ({ ...d, key: i }))} columns={columns}
           pagination={false} size="small" />
       </Card>
+      {fqcData.length > 0 && (
+        <Card title={`FQC 工站 FPY (${fqcData.length} 个工站)`} style={{ marginTop: 12 }}>
+          <Table dataSource={fqcData.map((d, i) => ({ ...d, key: i }))} columns={columns}
+            pagination={false} size="small" />
+        </Card>
+      )}
     </div>
   );
 }

@@ -15,7 +15,7 @@ const ProductContext = createContext<ProductContextType>({
 });
 
 export function ProductProvider({ children }: { children: ReactNode }) {
-  const [currentProduct, setCurrentProduct] = useState<Product>(mockProducts[0]);
+  const [currentProduct, setCurrentProduct] = useState<Product | null>(mockProducts.length > 0 ? mockProducts[0] : null);
 
   const handleSetProduct = useCallback((p: Product) => {
     setCurrentProduct(p);

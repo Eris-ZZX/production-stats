@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Select, Tag, Typography } from 'antd';
+import { Layout, Menu, Select, Tag, Typography, Button, Modal, Form, Input, message } from 'antd';
 import {
   DashboardOutlined,
   EditOutlined,
@@ -8,7 +8,9 @@ import {
   BarChartOutlined,
   LineChartOutlined,
   TrophyOutlined,
-  PieChartOutlined,
+  StockOutlined,
+  DotChartOutlined,
+  FundOutlined,
   FormOutlined,
   FileSearchOutlined,
   AppstoreOutlined,
@@ -16,6 +18,7 @@ import {
   BugOutlined,
   ToolOutlined,
   UnorderedListOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import { useProduct } from '../store/ProductContext';
 
@@ -41,7 +44,9 @@ const menuItems = [
       { key: '/dashboard/station-fpy', icon: <BarChartOutlined />, label: '工站FPY列表' },
       { key: '/dashboard/section-fpy', icon: <LineChartOutlined />, label: '工段FPY列表' },
       { key: '/dashboard/top', icon: <TrophyOutlined />, label: 'TOP缺陷排名' },
-      { key: '/dashboard/trend', icon: <PieChartOutlined />, label: '趋势图' },
+      { key: '/dashboard/station-trend', icon: <StockOutlined />, label: '工站趋势图' },
+      { key: '/dashboard/section-trend', icon: <FundOutlined />, label: '工段趋势图' },
+      { key: '/dashboard/defect-trend', icon: <DotChartOutlined />, label: '缺陷趋势图' },
     ],
   },
   {
@@ -63,9 +68,23 @@ export default function AppLayout() {
   const location = useLocation();
   const { currentProduct, products, setCurrentProduct } = useProduct();
   const [collapsed, setCollapsed] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [loginForm] = Form.useForm();
 
   const openKeys = [location.pathname.split('/')[1] || 'data-stats'];
   const selectedKeys = [location.pathname];
+
+  const handleLogin = async () => {
+    const row = await loginForm.validateFields();
+    if (row.username === 'admin' && row.password === 'admin') {
+      message.success('登录成功');
+      setLoginModalOpen(false);
+      loginForm.resetFields();
+      navigate('/admin/product-admin');
+    } else {
+      message.error('账号或密码错误');
+    }
+  };
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -108,6 +127,10 @@ export default function AppLayout() {
               ),
             }))}
           />
+          <Button type="text" icon={<LockOutlined />} style={{ marginLeft: 8 }}
+            onClick={() => setLoginModalOpen(true)}>
+            后台管理
+          </Button>
         </div>
       </Header>
 
@@ -125,7 +148,6 @@ export default function AppLayout() {
             top: 0,
           }}
         >
-          {/* 折叠按钮 — 上方 */}
           <div
             onClick={() => setCollapsed(!collapsed)}
             style={{
@@ -153,6 +175,19 @@ export default function AppLayout() {
           <Outlet />
         </Content>
       </Layout>
+
+      {/* 后台登录弹窗 */}
+      <Modal title="后台管理登录" open={loginModalOpen} onCancel={() => { setLoginModalOpen(false); loginForm.resetFields(); }}
+        onOk={handleLogin} okText="登录" width={360} destroyOnClose>
+        <Form form={loginForm} layout="vertical" style={{ marginTop: 16 }} autoComplete="off">
+          <Form.Item name="username" label="账号" rules={[{ required: true, message: '请输入账号' }]}>
+            <Input prefix={<LockOutlined />} placeholder="请输入账号" />
+          </Form.Item>
+          <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
+            <Input.Password prefix={<LockOutlined />} placeholder="请输入密码" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Layout>
   );
 }
