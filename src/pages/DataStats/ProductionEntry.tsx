@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Card, Form, Select, InputNumber, DatePicker, Button, Table, Modal, message, Typography, Tag, Popconfirm } from 'antd';
 import { PlusOutlined, DeleteOutlined, UnorderedListOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import SmartFilterBar, { applySmartFilters, type FilterCondition, type FilterField } from '../../components/SmartFilterBar';
 import { useProduct } from '../../store/ProductContext';
-import { mockStations, mockProducts } from '../../mockData';
+import { stationsApi, productLinesApi, productionRecordsApi } from '../../api';
+import type { Station, ProductLine } from '../../types';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -21,8 +22,13 @@ export default function ProductionEntry() {
   const { currentProduct } = useProduct();
   const [form] = Form.useForm();
 
+  // ===== 远端数据 =====
+  const [stations, setStations] = useState<Station[]>([]);
+  const [productLines, setProductLines] = useState<ProductLine[]>([]);
+
   // ===== 状态 =====
   const [records, setRecords] = useState<SavedRecord[]>([]);
+  const [loading, setLoading] = useState(false);
   const [editingKey, setEditingKey] = useState<number | null>(null);
   const [editForm] = Form.useForm();
 
@@ -36,12 +42,31 @@ export default function ProductionEntry() {
   const [batchProductId, setBatchProductId] = useState<number | null>(null);
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
 
+  // ===== 加载数据 =====
+  const loadRecords = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await productionRecordsApi.list();
+      setRecords(data.map((r: any) => ({ ...r, key: r.id })));
+    } catch (e: any) {
+      message.error('加载记录失败: ' + (e.message || '未知错误'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRecords();
+    stationsApi.list().then(setStations).catch((e: any) => message.error('加载工站失败: ' + (e.message || '未知错误')));
+    productLinesApi.list().then(setProductLines).catch((e: any) => message.error('加载产品线失败: ' + (e.message || '未知错误')));
+  }, [loadRecords]);
+
   const dataEntryStations = useMemo(() =>
-    mockStations.filter(s => s.isActive && s.isDataEntryType),
-  []);
+    stations.filter(s => s.isActive && s.isDataEntryType),
+  [stations]);
 
   // ===== 单条录入 =====
-  const handleSingleAdd = () => {
+  const handleSingleAdd = async () => {
     const values = form.getFieldsValue();
     if (!values.recordDate || !values.productId || !values.stationId || !values.outputQty) {
       message.warning('请填写日期、品号、工站和投产数'); return;
@@ -51,12 +76,19 @@ export default function ProductionEntry() {
     if (records.some(r => r.recordDate === date && r.productId === values.productId && r.stationId === values.stationId)) {
       message.error('该日期+品号+工站的记录已存在，不可重复录入'); return;
     }
-    setRecords(prev => [{
-      id: Date.now(), recordDate: date,
-      productId: values.productId, stationId: values.stationId, outputQty: values.outputQty, key: Date.now(),
-    }, ...prev]);
-    form.resetFields(['stationId', 'outputQty']);
-    message.success('录入成功');
+    try {
+      await productionRecordsApi.create({
+        recordDate: date,
+        productId: values.productId,
+        stationId: values.stationId,
+        outputQty: values.outputQty,
+      });
+      message.success('录入成功');
+      form.resetFields(['stationId', 'outputQty']);
+      loadRecords();
+    } catch (e: any) {
+      message.error('录入失败: ' + (e.message || '未知错误'));
+    }
   };
 
   // ===== 行内编辑 =====
@@ -77,16 +109,30 @@ export default function ProductionEntry() {
 
   const saveEdit = async (id: number) => {
     const values = await editForm.validateFields();
-    setRecords(prev => prev.map(r => r.id === id ? {
-      ...r,
-      recordDate: values.recordDate.format('YYYY-MM-DD'),
-      productId: values.productId,
-      stationId: values.stationId,
-      outputQty: values.outputQty,
-    } : r));
-    setEditingKey(null);
-    editForm.resetFields();
-    message.success('已保存');
+    try {
+      await productionRecordsApi.update(id, {
+        recordDate: values.recordDate.format('YYYY-MM-DD'),
+        productId: values.productId,
+        stationId: values.stationId,
+        outputQty: values.outputQty,
+      });
+      setEditingKey(null);
+      editForm.resetFields();
+      message.success('已保存');
+      loadRecords();
+    } catch (e: any) {
+      message.error('保存失败: ' + (e.message || '未知错误'));
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      await productionRecordsApi.remove(id);
+      message.success('已删除');
+      loadRecords();
+    } catch (e: any) {
+      message.error('删除失败: ' + (e.message || '未知错误'));
+    }
   };
 
   const isEditing = (r: SavedRecord) => r.id === editingKey;
@@ -94,15 +140,15 @@ export default function ProductionEntry() {
   // 筛选逻辑
   const recFilterFields: FilterField[] = [
     { key: 'recordDate', label: '日期', type: 'date' },
-    { key: 'productId', label: '品号', type: 'text', options: mockProducts.map(p => ({ value: p.code, label: p.code })) },
+    { key: 'productId', label: '品号', type: 'text', options: productLines.map(p => ({ value: p.name, label: p.name })) },
     { key: 'stationId', label: '工站', type: 'text', options: dataEntryStations.map(s => ({ value: s.stationName, label: s.stationName })) },
     { key: 'outputQty', label: '投产数', type: 'number' },
   ];
 
   const filteredRecords = useMemo(() => applySmartFilters(records, recSearch, recConditions, recFilterFields, [
-    'recordDate', r => mockProducts.find(p => p.id === r.productId)?.code || '',
+    'recordDate', r => productLines.find(p => p.id === r.productId)?.name || '',
     r => dataEntryStations.find(s => s.id === r.stationId)?.stationName || '', 'outputQty',
-  ]), [records, recSearch, recConditions]);
+  ]), [records, recSearch, recConditions, productLines, dataEntryStations]);
 
   // ===== 批量录入 =====
   // 已有记录的 "日期_品号_工站" 查重key
@@ -125,7 +171,7 @@ export default function ProductionEntry() {
   const isBatchRowDup = (r: BatchRow) => existingKeys.has(`${r.recordDate}_${r.productId}_${r.stationId}`);
   const dupCount = batchRows.filter(r => isBatchRowDup(r)).length;
 
-  const handleBatchSave = () => {
+  const handleBatchSave = async () => {
     // 检查填了投产数的行是否有重复
     const filled = batchRows.filter(r => r.outputQty != null && r.outputQty > 0);
     if (filled.length === 0) { message.warning('请至少填写一行的投产数'); return; }
@@ -134,12 +180,19 @@ export default function ProductionEntry() {
       message.error(`有 ${filledDups.length} 条记录已存在（日期+品号+工站重复），请删除重复行后重试`);
       return;
     }
-    setRecords(prev => [...filled.map(r => ({
-      id: Date.now() + Math.random() * 10000, recordDate: r.recordDate,
-      productId: r.productId, stationId: r.stationId, outputQty: r.outputQty!, key: Date.now(),
-    })), ...prev]);
-    setBatchRows(prev => prev.filter(r => r.outputQty == null || r.outputQty <= 0));
-    message.success(`录入成功，共 ${filled.filter(r => !isBatchRowDup(r)).length} 条`);
+    try {
+      await productionRecordsApi.batchCreate(filled.map(r => ({
+        recordDate: r.recordDate,
+        productId: r.productId,
+        stationId: r.stationId,
+        outputQty: r.outputQty,
+      })));
+      message.success(`录入成功，共 ${filled.length} 条`);
+      setBatchRows(prev => prev.filter(r => r.outputQty == null || r.outputQty <= 0));
+      loadRecords();
+    } catch (e: any) {
+      message.error('批量录入失败: ' + (e.message || '未知错误'));
+    }
   };
 
   // ===== 表格列（含编辑视图） =====
@@ -164,11 +217,11 @@ export default function ProductionEntry() {
           return (
             <Form.Item name="productId" style={{ margin: 0 }} rules={[{ required: true }]}>
               <Select size="small" style={{ width: 110 }} showSearch optionFilterProp="label"
-                options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))} />
+                options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))} />
             </Form.Item>
           );
         }
-        return mockProducts.find(p => p.id === r.productId)?.code || '-';
+        return productLines.find(p => p.id === r.productId)?.name || '-';
       },
     },
     {
@@ -226,7 +279,7 @@ export default function ProductionEntry() {
         return (
           <span style={{ whiteSpace: 'nowrap' }}>
             <Button type="link" size="small" onClick={() => startEdit(r)}>编辑</Button>
-            <Popconfirm title="确定删除?" onConfirm={() => setRecords(prev => prev.filter(x => x.id !== r.id))}>
+            <Popconfirm title="确定删除?" onConfirm={() => handleDelete(r.id)}>
               <Button type="link" size="small" danger icon={<DeleteOutlined />} />
             </Popconfirm>
           </span>
@@ -262,7 +315,7 @@ export default function ProductionEntry() {
 
   return (
     <div>
-      <Title level={4}>{currentProduct?.code} — 制程投产录入</Title>
+      <Title level={4}>{currentProduct?.name} — 制程投产录入</Title>
 
       {/* 单条录入 */}
       <Card style={{ marginBottom: 12 }}>
@@ -272,7 +325,7 @@ export default function ProductionEntry() {
           </Form.Item>
           <Form.Item name="productId" label="品号" rules={[{ required: true }]}>
             <Select style={{ width: 150 }} showSearch optionFilterProp="label" placeholder="选择品号"
-              options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))} />
+              options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))} />
           </Form.Item>
           <Form.Item name="stationId" label="工站" rules={[{ required: true }]}>
             <Select style={{ width: 240 }} showSearch optionFilterProp="label" placeholder="选择工站"
@@ -294,7 +347,7 @@ export default function ProductionEntry() {
       <Card title={<span>已录入记录 ({filteredRecords.length} 条) <SmartFilterBar fields={recFilterFields} searchText={recSearch} onSearchChange={setRecSearch} conditions={recConditions} onConditionsChange={setRecConditions} /></span>}>
         <Form form={editForm} component={false}>
           <Table dataSource={filteredRecords.map(r => ({ ...r, key: r.id }))} columns={getEditableColumns()}
-            pagination={{ pageSize: 10, showTotal: t => `共 ${t} 条` }} size="small" />
+            loading={loading} pagination={{ pageSize: 10, showTotal: t => `共 ${t} 条` }} size="small" />
         </Form>
       </Card>
 
@@ -303,9 +356,9 @@ export default function ProductionEntry() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           <DatePicker style={{ width: 140 }} placeholder="选择日期" onChange={(d) => setBatchDate(d ? d.format('YYYY-MM-DD') : '')} />
           <Select style={{ width: 160 }} showSearch optionFilterProp="label" placeholder="选择品号" value={batchProductId} onChange={setBatchProductId}
-            options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))} />
+            options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))} />
           <Button type="primary" onClick={handleGenerateBatch}>一键生成工站列表</Button>
-          {batchDate && batchProductId && <Tag color="processing">{batchDate} / {mockProducts.find(p => p.id === batchProductId)?.code} — {dataEntryStations.length} 个工站</Tag>}
+          {batchDate && batchProductId && <Tag color="processing">{batchDate} / {productLines.find(p => p.id === batchProductId)?.name} — {dataEntryStations.length} 个工站</Tag>}
         </div>
         {batchRows.length > 0 && (
           <>

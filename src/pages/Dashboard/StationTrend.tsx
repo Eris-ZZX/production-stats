@@ -1,15 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, DatePicker, Select, Typography, Tag, Space, Radio } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { getStationTrendData, mockProducts } from '../../mockData';
+import { dashboardApi, productLinesApi } from '../../api';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 dayjs.extend(isoWeek);
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
-
-const activeProductIds = mockProducts.filter(p => p.status === 'active').map(p => p.id);
 
 const today = dayjs().format('YYYY-MM-DD');
 const twoWeeksAgo = dayjs().subtract(13, 'day').format('YYYY-MM-DD');
@@ -29,13 +27,8 @@ const GRANULARITY = [
 
 const colors = ['#1890ff', '#52c41a', '#fa8c16', '#722ed1', '#eb2f96', '#13c2c2', '#f5222d', '#2f54eb', '#faad14', '#a0d911'];
 
-function formatLabel(date: string, granularity: string): string {
-  if (granularity === 'month') return dayjs(date).format('YYYY-MM');
-  if (granularity === 'week') {
-    const d = dayjs(date);
-    return `${d.isoWeek()}周`;
-  }
-  return date;
+interface ProductLine {
+  id: number; name: string; isActive: boolean;
 }
 
 function aggregateByGranularity(
@@ -85,16 +78,29 @@ function aggregateByGranularity(
 
 export default function StationTrend() {
   const [dates, setDates] = useState<[string, string] | null>([twoWeeksAgo, today]);
-  const [productIds, setProductIds] = useState<number[]>(activeProductIds);
+  const [productIds, setProductIds] = useState<number[]>([]);
+  const [productLines, setProductLines] = useState<ProductLine[]>([]);
   const [defectType, setDefectType] = useState<string | undefined>(undefined);
   const [selectedStationIds, setSelectedStationIds] = useState<number[]>([]);
   const [granularity, setGranularity] = useState<string>('day');
+  const [rawData, setRawData] = useState<{ dates: string[]; stations: any[] }>({ dates: [], stations: [] });
 
-  const rawData = useMemo(() => {
-    if (productIds.length === 0) return { dates: [], stations: [] };
-    // 需要覆盖日期范围前额外几天以支持周/月聚合的首周
+  useEffect(() => {
+    productLinesApi.list().then((lines: ProductLine[]) => {
+      setProductLines(lines);
+      const activeIds = lines.filter(p => p.isActive).map(p => p.id);
+      if (activeIds.length > 0) setProductIds(activeIds);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (productIds.length === 0) { setRawData({ dates: [], stations: [] }); return; }
     const startDate = granularity !== 'day' ? dayjs(dates?.[0]).subtract(6, 'day').format('YYYY-MM-DD') : dates?.[0];
-    return getStationTrendData(productIds, startDate, dates?.[1], defectType);
+    const params: any = { productIds: productIds.join(',') };
+    if (startDate) params.startDate = startDate;
+    if (dates?.[1]) params.endDate = dates[1];
+    if (defectType) params.defectType = defectType;
+    dashboardApi.stationTrend(params).then(data => setRawData(data));
   }, [productIds, dates, defectType, granularity]);
 
   const data = useMemo(() => aggregateByGranularity(rawData.dates, rawData.stations, granularity),
@@ -145,7 +151,7 @@ export default function StationTrend() {
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
             onChange={setProductIds} placeholder="选择品号（默认全选）"
-            options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))}
+            options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))}
             maxTagCount={4} />
           <span>时间区间:</span>
           <RangePicker size="small"

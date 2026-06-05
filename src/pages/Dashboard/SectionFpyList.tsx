@@ -1,15 +1,17 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, Table, DatePicker, Select, Typography, Tag, Space } from 'antd';
-import { getSectionFpy, getFqcFpy, mockProducts } from '../../mockData';
+import { dashboardApi, productLinesApi } from '../../api';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
 
-const activeProductIds = mockProducts.filter(p => p.status === 'active').map(p => p.id);
-
 const fpyColor = (v: number, t: number) => v >= t ? 'green' : v >= t - 2 ? 'orange' : 'red';
+
+interface ProductLine {
+  id: number; name: string; isActive: boolean;
+}
 
 interface SectionRow {
   majorSection: string;
@@ -25,16 +27,26 @@ interface FqcRow {
 
 export default function SectionFpyList() {
   const [dates, setDates] = useState<[string, string] | null>(['2026-06-01', '2026-06-03']);
-  const [productIds, setProductIds] = useState<number[]>(activeProductIds);
+  const [productIds, setProductIds] = useState<number[]>([]);
+  const [productLines, setProductLines] = useState<ProductLine[]>([]);
+  const [data, setData] = useState<SectionRow[]>([]);
+  const [fqcData, setFqcData] = useState<FqcRow[]>([]);
 
-  const data = useMemo(() => {
-    if (productIds.length === 0) return [];
-    return getSectionFpy(productIds, dates?.[0], dates?.[1]);
-  }, [productIds, dates]);
+  useEffect(() => {
+    productLinesApi.list().then((lines: ProductLine[]) => {
+      setProductLines(lines);
+      const activeIds = lines.filter(p => p.isActive).map(p => p.id);
+      if (activeIds.length > 0) setProductIds(activeIds);
+    });
+  }, []);
 
-  const fqcData = useMemo(() => {
-    if (productIds.length === 0) return [];
-    return getFqcFpy(productIds, dates?.[0], dates?.[1]);
+  useEffect(() => {
+    if (productIds.length === 0) { setData([]); setFqcData([]); return; }
+    const params: any = { productIds: productIds.join(',') };
+    if (dates?.[0]) params.startDate = dates[0];
+    if (dates?.[1]) params.endDate = dates[1];
+    dashboardApi.sectionFpy(params).then(d => setData(d));
+    dashboardApi.fqcFpy(params).then(d => setFqcData(d));
   }, [productIds, dates]);
 
   const table = (title: string, fpyKey: keyof SectionRow, targetKey: keyof SectionRow) => {
@@ -101,7 +113,7 @@ export default function SectionFpyList() {
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
             onChange={setProductIds} placeholder="选择品号（默认全选）"
-            options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))}
+            options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))}
             maxTagCount={4} />
           <span>时间区间:</span>
           <RangePicker size="small"

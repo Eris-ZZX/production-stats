@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Card, Form, Select, InputNumber, DatePicker, Button, Table, Modal, Switch, message, Typography, Tag, Popconfirm } from 'antd';
 import { PlusOutlined, DeleteOutlined, UnorderedListOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import SmartFilterBar, { applySmartFilters, type FilterCondition, type FilterField } from '../../components/SmartFilterBar';
 import { useProduct } from '../../store/ProductContext';
-import { mockStations, mockProducts, mockDefects, mockStationDetailRecords } from '../../mockData';
+import { stationsApi, productLinesApi, defectCodesApi, stationDetailsApi } from '../../api';
+import type { Station, ProductLine, DefectCode } from '../../types';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -22,22 +23,14 @@ export default function StationDetailEntry() {
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
 
-  const [records, setRecords] = useState<StationDetailRecord[]>(() =>
-    mockStationDetailRecords.map((r, i) => {
-      const d = mockDefects.find(x => x.defectCode === r.defectCode);
-      return {
-        id: i + 1,
-        productId: r.productId,
-        recordDate: r.recordDate,
-        stationId: r.stationId,
-        defectCategory: d?.component || '',
-        defectType: r.defectType,
-        defectLocation: d?.location || '',
-        defectCode: r.defectCode,
-        qty: r.qty,
-      };
-    })
-  );
+  // ===== 远端数据 =====
+  const [stations, setStations] = useState<Station[]>([]);
+  const [productLines, setProductLines] = useState<ProductLine[]>([]);
+  const [defects, setDefects] = useState<DefectCode[]>([]);
+
+  // ===== 状态 =====
+  const [records, setRecords] = useState<StationDetailRecord[]>([]);
+  const [loading, setLoading] = useState(false);
   const [editingKey, setEditingKey] = useState<number | null>(null);
   const [selectedDefectCode, setSelectedDefectCode] = useState<string | null>(null);
   const [selectedStationId, setSelectedStationId] = useState<number | null>(null);
@@ -51,43 +44,89 @@ export default function StationDetailEntry() {
   const [batchProductId, setBatchProductId] = useState<number | null>(null);
   const [batchStationId, setBatchStationId] = useState<number | null>(null);
   const [batchRows, setBatchRows] = useState<BatchDefectRow[]>([]);
-  let nextBatchRowId = Date.now();
 
-  const stations = mockStations.filter(s => s.isActive && s.isDataEntryType);
-  const defects = mockDefects.filter(d => d.isActive);
+  // ===== 加载数据 =====
+  const loadRecords = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await stationDetailsApi.list();
+      setRecords(data.map((r: any) => ({
+        id: r.id,
+        productId: r.productId,
+        recordDate: r.recordDate,
+        stationId: r.stationId,
+        defectCategory: r.defectCategory || (defects.find((d: DefectCode) => d.defectCode === r.defectCode)?.component || ''),
+        defectType: r.defectType || (defects.find((d: DefectCode) => d.defectCode === r.defectCode)?.type || ''),
+        defectLocation: r.defectLocation || (defects.find((d: DefectCode) => d.defectCode === r.defectCode)?.location || ''),
+        defectCode: r.defectCode,
+        qty: r.qty,
+      })));
+    } catch (e: any) {
+      message.error('加载记录失败: ' + (e.message || '未知错误'));
+    } finally {
+      setLoading(false);
+    }
+  }, [defects]);
+
+  useEffect(() => {
+    const loadDropdowns = async () => {
+      try {
+        const [stationList, productLineList, defectList] = await Promise.all([
+          stationsApi.list(),
+          productLinesApi.list(),
+          defectCodesApi.list(),
+        ]);
+        setStations(stationList);
+        setProductLines(productLineList);
+        setDefects(defectList);
+      } catch (e: any) {
+        message.error('加载基础数据失败: ' + (e.message || '未知错误'));
+      }
+    };
+    loadDropdowns();
+  }, []);
+
+  useEffect(() => {
+    if (defects.length > 0) {
+      loadRecords();
+    }
+  }, [loadRecords]);
+
+  const stations2 = useMemo(() => stations.filter(s => s.isActive && s.isDataEntryType), [stations]);
+  const activeDefects = useMemo(() => defects.filter(d => d.isActive), [defects]);
 
   const batchFilteredDefects = useMemo(() => {
-    if (!batchStationId) return defects;
-    const station = stations.find(s => s.id === batchStationId);
-    if (!station || !station.abnormalPositions?.length) return defects;
-    return defects.filter(d => station.abnormalPositions!.includes(d.location));
-  }, [batchStationId, defects, stations]);
+    if (!batchStationId) return activeDefects;
+    const station = stations2.find(s => s.id === batchStationId);
+    if (!station || !station.abnormalPositions?.length) return activeDefects;
+    return activeDefects.filter(d => station.abnormalPositions!.includes(d.location));
+  }, [batchStationId, activeDefects, stations2]);
 
   // 单条录入缺陷选项：根据开关决定是否按工站异常位置过滤
   const shownDefects = useMemo(() => {
-    if (!filterByPosition || !selectedStationId) return defects;
-    const station = stations.find(s => s.id === selectedStationId);
-    if (!station || !station.abnormalPositions?.length) return defects;
-    return defects.filter(d => station.abnormalPositions!.includes(d.location));
-  }, [filterByPosition, selectedStationId, defects, stations]);
+    if (!filterByPosition || !selectedStationId) return activeDefects;
+    const station = stations2.find(s => s.id === selectedStationId);
+    if (!station || !station.abnormalPositions?.length) return activeDefects;
+    return activeDefects.filter(d => station.abnormalPositions!.includes(d.location));
+  }, [filterByPosition, selectedStationId, activeDefects, stations2]);
 
   const handleStationChange = (stationId: number) => {
     setSelectedStationId(stationId);
     form.resetFields(['defectCode']);
     setSelectedDefectCode(null);
-    const s = stations.find(x => x.id === stationId);
+    const s = stations2.find(x => x.id === stationId);
     if (s) form.setFieldsValue({ majorSection: s.majorSection, minorSection: s.minorSection });
   };
 
   const handleDefectCodeChange = (code: string | null) => {
     setSelectedDefectCode(code);
     if (code) {
-      const d = defects.find(x => x.defectCode === code);
+      const d = activeDefects.find(x => x.defectCode === code);
       if (d) form.setFieldsValue({ defectCategory: d.component, defectType: d.type, defectLocation: d.location });
     }
   };
 
-  const handleSingleAdd = () => {
+  const handleSingleAdd = async () => {
     const values = form.getFieldsValue();
     if (!values.recordDate || !values.productId || !values.stationId || !values.defectCode || !values.qty) {
       message.warning('请填写日期、品号、工站、缺陷和数量'); return;
@@ -96,14 +135,21 @@ export default function StationDetailEntry() {
     if (records.some(r => r.recordDate === date && r.productId === values.productId && r.stationId === values.stationId && r.defectCode === values.defectCode)) {
       message.error('该日期+品号+工站+缺陷的记录已存在，不可重复录入'); return;
     }
-    setRecords(prev => [{
-      id: Date.now(), productId: values.productId, recordDate: date,
-      stationId: values.stationId, defectCategory: values.defectCategory, defectType: values.defectType,
-      defectLocation: values.defectLocation, defectCode: values.defectCode, qty: values.qty,
-    }, ...prev]);
-    form.resetFields(['stationId', 'defectCode', 'defectCategory', 'defectType', 'defectLocation', 'qty']);
-    setSelectedDefectCode(null);
-    message.success('录入成功');
+    try {
+      await stationDetailsApi.create({
+        recordDate: date,
+        productId: values.productId,
+        stationId: values.stationId,
+        defectCode: values.defectCode,
+        qty: values.qty,
+      });
+      message.success('录入成功');
+      form.resetFields(['stationId', 'defectCode', 'defectCategory', 'defectType', 'defectLocation', 'qty']);
+      setSelectedDefectCode(null);
+      loadRecords();
+    } catch (e: any) {
+      message.error('录入失败: ' + (e.message || '未知错误'));
+    }
   };
 
   const startEdit = (r: StationDetailRecord) => {
@@ -113,15 +159,35 @@ export default function StationDetailEntry() {
   const cancelEdit = () => { setEditingKey(null); editForm.resetFields(); };
   const saveEdit = async (id: number) => {
     const values = await editForm.validateFields();
-    const d = defects.find(x => x.defectCode === values.defectCode);
-    setRecords(prev => prev.map(r => r.id === id ? { ...r, recordDate: values.recordDate.format('YYYY-MM-DD'), productId: values.productId, stationId: values.stationId, defectCode: values.defectCode, defectCategory: d?.component || r.defectCategory, defectType: d?.type || r.defectType, defectLocation: d?.location || r.defectLocation, qty: values.qty } : r));
-    setEditingKey(null); editForm.resetFields(); message.success('已保存');
+    try {
+      await stationDetailsApi.update(id, {
+        recordDate: values.recordDate.format('YYYY-MM-DD'),
+        productId: values.productId,
+        stationId: values.stationId,
+        defectCode: values.defectCode,
+        qty: values.qty,
+      });
+      setEditingKey(null); editForm.resetFields(); message.success('已保存');
+      loadRecords();
+    } catch (e: any) {
+      message.error('保存失败: ' + (e.message || '未知错误'));
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      await stationDetailsApi.remove(id);
+      message.success('已删除');
+      loadRecords();
+    } catch (e: any) {
+      message.error('删除失败: ' + (e.message || '未知错误'));
+    }
   };
 
   const isEditing = (r: StationDetailRecord) => r.id === editingKey;
 
   const openBatch = () => { setBatchOpen(true); setBatchDate(''); setBatchProductId(null); setBatchStationId(null); setBatchRows([]); };
-  const addBatchRow = () => { setBatchRows(prev => [...prev, { id: ++nextBatchRowId, defectCode: null, qty: null }]); };
+  const addBatchRow = () => { setBatchRows(prev => [...prev, { id: Date.now(), defectCode: null, qty: null }]); };
   const updateBatchRowDefect = (rowId: number, code: string | null) => setBatchRows(prev => prev.map(r => r.id === rowId ? { ...r, defectCode: code } : r));
   const updateBatchRowQty = (rowId: number, val: number | null) => setBatchRows(prev => prev.map(r => r.id === rowId ? { ...r, qty: val } : r));
   const removeBatchRow = (rowId: number) => setBatchRows(prev => prev.filter(r => r.id !== rowId));
@@ -130,42 +196,58 @@ export default function StationDetailEntry() {
   const isBatchRowDup = (r: BatchDefectRow) => batchDate && batchProductId && batchStationId && r.defectCode
     ? existingDetailKeys.has(`${batchDate}_${batchProductId}_${batchStationId}_${r.defectCode}`) : false;
 
-  const handleBatchSave = () => {
+  const handleBatchSave = async () => {
     if (!batchDate || !batchProductId || !batchStationId) { message.warning('请填写日期、品号和工站'); return; }
     const filled = batchRows.filter(r => r.defectCode && r.qty != null && r.qty > 0);
     if (filled.length === 0) { message.warning('请至少添加一行缺陷并填写数量'); return; }
     const filledDups = filled.filter(r => isBatchRowDup(r));
     if (filledDups.length > 0) { message.error(`有 ${filledDups.length} 条已存在，请删除重复行后重试`); return; }
-    setRecords(prev => [...filled.map(r => { const d = defects.find(x => x.defectCode === r.defectCode)!; return { id: Date.now() + Math.random() * 10000, productId: batchProductId!, recordDate: batchDate, stationId: batchStationId!, defectCategory: d.component, defectType: d.type, defectLocation: d.location, defectCode: d.defectCode, qty: r.qty! }; }), ...prev]);
-    setBatchRows([]); message.success(`批量录入成功，共 ${filled.length} 条`);
+    try {
+      await stationDetailsApi.batchCreate(filled.map(r => {
+        const d = activeDefects.find(x => x.defectCode === r.defectCode)!;
+        return {
+          recordDate: batchDate,
+          productId: batchProductId!,
+          stationId: batchStationId!,
+          defectCode: r.defectCode!,
+          defectType: d.type,
+          qty: r.qty!,
+        };
+      }));
+      message.success(`批量录入成功，共 ${filled.length} 条`);
+      setBatchRows([]);
+      loadRecords();
+    } catch (e: any) {
+      message.error('批量录入失败: ' + (e.message || '未知错误'));
+    }
   };
 
   const recFilterFields2: FilterField[] = [
     { key: 'recordDate', label: '日期', type: 'date' },
-    { key: 'productId', label: '品号', type: 'text', options: mockProducts.map(p => ({ value: p.code, label: p.code })) },
-    { key: 'stationId', label: '工站', type: 'text', options: stations.map(s => ({ value: s.stationName, label: s.stationName })), getValue: (r: StationDetailRecord) => stations.find(x => x.id === r.stationId)?.stationName || '' },
+    { key: 'productId', label: '品号', type: 'text', options: productLines.map(p => ({ value: p.name, label: p.name })) },
+    { key: 'stationId', label: '工站', type: 'text', options: stations2.map(s => ({ value: s.stationName, label: s.stationName })), getValue: (r: StationDetailRecord) => stations2.find(x => x.id === r.stationId)?.stationName || '' },
     { key: 'defectCategory', label: '组件', type: 'text' }, { key: 'defectType', label: '类型', type: 'text' }, { key: 'defectLocation', label: '位置', type: 'text' },
-    { key: 'defect', label: '缺陷', type: 'text', options: defects.map(d => ({ value: d.defect, label: d.defect })), getValue: (r: StationDetailRecord) => defects.find(x => x.defectCode === r.defectCode)?.defect || '' },
+    { key: 'defect', label: '缺陷', type: 'text', options: activeDefects.map(d => ({ value: d.defect, label: d.defect })), getValue: (r: StationDetailRecord) => activeDefects.find(x => x.defectCode === r.defectCode)?.defect || '' },
     { key: 'qty', label: '数量', type: 'number' },
   ];
 
   const filteredRecords2 = useMemo(() => applySmartFilters(records, recSearch2, recConditions2, recFilterFields2, [
-    'recordDate', r => mockProducts.find(p => p.id === r.productId)?.code || '', r => stations.find(s => s.id === r.stationId)?.stationName || '',
-    'defectCategory', 'defectType', 'defectLocation', r => defects.find(x => x.defectCode === r.defectCode)?.defect || '', 'qty',
-  ]), [records, recSearch2, recConditions2]);
+    'recordDate', r => productLines.find(p => p.id === r.productId)?.name || '', r => stations2.find(s => s.id === r.stationId)?.stationName || '',
+    'defectCategory', 'defectType', 'defectLocation', r => activeDefects.find(x => x.defectCode === r.defectCode)?.defect || '', 'qty',
+  ]), [records, recSearch2, recConditions2, productLines, stations2, activeDefects]);
 
   const getEditableColumns = () => [
     { title: '日期', dataIndex: 'recordDate', key: 'date', width: 130, render: (_: unknown, r: StationDetailRecord) => isEditing(r) ? <Form.Item name="recordDate" style={{ margin: 0 }} rules={[{ required: true }]}><DatePicker style={{ width: 120 }} size="small" /></Form.Item> : r.recordDate },
-    { title: '品号', dataIndex: 'productId', key: 'product', width: 100, render: (_: unknown, r: StationDetailRecord) => isEditing(r) ? <Form.Item name="productId" style={{ margin: 0 }} rules={[{ required: true }]}><Select size="small" style={{ width: 90 }} showSearch optionFilterProp="label" options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))} /></Form.Item> : mockProducts.find(p => p.id === r.productId)?.code || '-' },
-    { title: '大工段', dataIndex: 'stationId', key: 'major', width: 70, render: (id: number) => <Tag color="blue">{stations.find(x => x.id === id)?.majorSection || '-'}</Tag> },
-    { title: '小工段', dataIndex: 'stationId', key: 'minor', width: 80, render: (id: number) => <Tag color="green">{stations.find(x => x.id === id)?.minorSection || '-'}</Tag> },
-    { title: '工站', dataIndex: 'stationId', key: 'name', width: 100, render: (_: unknown, r: StationDetailRecord) => isEditing(r) ? <Form.Item name="stationId" style={{ margin: 0 }} rules={[{ required: true }]}><Select size="small" style={{ width: 180 }} showSearch optionFilterProp="label" options={stations.map(s => ({ value: s.id, label: `${s.majorSection} / ${s.stationName}` }))} /></Form.Item> : stations.find(s => s.id === r.stationId)?.stationName || '-' },
+    { title: '品号', dataIndex: 'productId', key: 'product', width: 100, render: (_: unknown, r: StationDetailRecord) => isEditing(r) ? <Form.Item name="productId" style={{ margin: 0 }} rules={[{ required: true }]}><Select size="small" style={{ width: 90 }} showSearch optionFilterProp="label" options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))} /></Form.Item> : productLines.find(p => p.id === r.productId)?.name || '-' },
+    { title: '大工段', dataIndex: 'stationId', key: 'major', width: 70, render: (id: number) => <Tag color="blue">{stations2.find(x => x.id === id)?.majorSection || '-'}</Tag> },
+    { title: '小工段', dataIndex: 'stationId', key: 'minor', width: 80, render: (id: number) => <Tag color="green">{stations2.find(x => x.id === id)?.minorSection || '-'}</Tag> },
+    { title: '工站', dataIndex: 'stationId', key: 'name', width: 100, render: (_: unknown, r: StationDetailRecord) => isEditing(r) ? <Form.Item name="stationId" style={{ margin: 0 }} rules={[{ required: true }]}><Select size="small" style={{ width: 180 }} showSearch optionFilterProp="label" options={stations2.map(s => ({ value: s.id, label: `${s.majorSection} / ${s.stationName}` }))} /></Form.Item> : stations2.find(s => s.id === r.stationId)?.stationName || '-' },
     { title: '组件', dataIndex: 'defectCategory', key: 'cat', width: 80, render: (v: string) => <Tag color="blue">{v}</Tag> },
     { title: '类型', dataIndex: 'defectType', key: 'type', width: 60, render: (v: string) => <Tag color="cyan">{v}</Tag> },
     { title: '位置', dataIndex: 'defectLocation', key: 'loc', width: 60, render: (v: string) => <Tag color="geekblue">{v}</Tag> },
-    { title: '缺陷', dataIndex: 'defectCode', key: 'defect', width: 220, render: (_: unknown, r: StationDetailRecord) => { if (isEditing(r)) { const stn = stations.find(s => s.id === editForm.getFieldValue('stationId') || r.stationId); const opts = stn?.abnormalPositions?.length ? defects.filter(d => stn.abnormalPositions!.includes(d.location)) : defects; return <Form.Item name="defectCode" style={{ margin: 0 }} rules={[{ required: true }]}><Select size="small" style={{ width: 200 }} showSearch optionFilterProp="label" options={opts.map(d => ({ value: d.defectCode, label: `${d.component}/${d.type}/${d.location}/${d.defect}` }))} /></Form.Item>; } const d = defects.find(x => x.defectCode === r.defectCode); return d?.defect || r.defectCode; } },
+    { title: '缺陷', dataIndex: 'defectCode', key: 'defect', width: 220, render: (_: unknown, r: StationDetailRecord) => { if (isEditing(r)) { const stn = stations2.find(s => s.id === editForm.getFieldValue('stationId') || r.stationId); const opts = stn?.abnormalPositions?.length ? activeDefects.filter(d => stn.abnormalPositions!.includes(d.location)) : activeDefects; return <Form.Item name="defectCode" style={{ margin: 0 }} rules={[{ required: true }]}><Select size="small" style={{ width: 200 }} showSearch optionFilterProp="label" options={opts.map(d => ({ value: d.defectCode, label: `${d.component}/${d.type}/${d.location}/${d.defect}` }))} /></Form.Item>; } const d = activeDefects.find(x => x.defectCode === r.defectCode); return d?.defect || r.defectCode; } },
     { title: '数量', dataIndex: 'qty', key: 'qty', width: 80, render: (_: unknown, r: StationDetailRecord) => isEditing(r) ? <Form.Item name="qty" style={{ margin: 0 }} rules={[{ required: true }]}><InputNumber min={1} size="small" style={{ width: 70 }} /></Form.Item> : r.qty },
-    { title: '操作', key: 'action', width: 130, render: (_: unknown, r: StationDetailRecord) => isEditing(r) ? <span style={{ whiteSpace: 'nowrap' }}><Button type="link" size="small" icon={<CheckOutlined />} onClick={() => saveEdit(r.id)}>保存</Button><Button type="link" size="small" icon={<CloseOutlined />} onClick={cancelEdit}>取消</Button></span> : <span style={{ whiteSpace: 'nowrap' }}><Button type="link" size="small" onClick={() => startEdit(r)}>编辑</Button><Popconfirm title="确定删除?" onConfirm={() => setRecords(prev => prev.filter(x => x.id !== r.id))}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm></span> },
+    { title: '操作', key: 'action', width: 130, render: (_: unknown, r: StationDetailRecord) => isEditing(r) ? <span style={{ whiteSpace: 'nowrap' }}><Button type="link" size="small" icon={<CheckOutlined />} onClick={() => saveEdit(r.id)}>保存</Button><Button type="link" size="small" icon={<CloseOutlined />} onClick={cancelEdit}>取消</Button></span> : <span style={{ whiteSpace: 'nowrap' }}><Button type="link" size="small" onClick={() => startEdit(r)}>编辑</Button><Popconfirm title="确定删除?" onConfirm={() => handleDelete(r.id)}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm></span> },
   ];
 
   const batchColumns = [
@@ -178,7 +260,7 @@ export default function StationDetailEntry() {
 
   return (
     <div>
-      <Title level={4}>{currentProduct?.code} — 工站明细录入</Title>
+      <Title level={4}>{currentProduct?.name} — 工站明细录入</Title>
 
       {/* 单条录入 */}
       <Card style={{ marginBottom: 12 }}>
@@ -193,13 +275,13 @@ export default function StationDetailEntry() {
             <span style={{ fontWeight: 500, fontSize: 14, flexShrink: 0 }}>品号</span>
             <Form.Item name="productId" rules={[{ required: true }]} style={{ margin: 0, flex: 1, minWidth: 120 }}>
               <Select style={{ width: '100%' }} showSearch optionFilterProp="label" placeholder="选择品号"
-                options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))} />
+                options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))} />
             </Form.Item>
             <span style={{ fontWeight: 500, fontSize: 14, flexShrink: 0 }}>工站</span>
             <Form.Item name="stationId" rules={[{ required: true }]} style={{ margin: 0, flex: 1.5, minWidth: 160 }}>
               <Select style={{ width: '100%' }} showSearch optionFilterProp="label" placeholder="选择工站"
                 onChange={handleStationChange}
-                options={stations.map(s => ({ value: s.id, label: `${s.majorSection} / ${s.minorSection} / ${s.stationName}` }))} />
+                options={stations2.map(s => ({ value: s.id, label: `${s.majorSection} / ${s.minorSection} / ${s.stationName}` }))} />
             </Form.Item>
             <span style={{ fontWeight: 500, fontSize: 14, flexShrink: 0 }}>缺陷</span>
             <Form.Item name="defectCode" rules={[{ required: true }]} style={{ margin: 0, flex: 2, minWidth: 200 }}>
@@ -228,7 +310,7 @@ export default function StationDetailEntry() {
       {/* 可编辑表格 */}
       <Card title={<span>已录入记录 ({filteredRecords2.length} 条) <SmartFilterBar fields={recFilterFields2} searchText={recSearch2} onSearchChange={setRecSearch2} conditions={recConditions2} onConditionsChange={setRecConditions2} /></span>}>
         <Form form={editForm} component={false}>
-          <Table dataSource={filteredRecords2.map((r, i) => ({ ...r, key: i }))} columns={getEditableColumns()} pagination={{ pageSize: 10, showTotal: t => `共 ${t} 条` }} size="small" />
+          <Table dataSource={filteredRecords2.map((r, i) => ({ ...r, key: i }))} columns={getEditableColumns()} loading={loading} pagination={{ pageSize: 10, showTotal: t => `共 ${t} 条` }} size="small" />
         </Form>
       </Card>
 
@@ -238,9 +320,9 @@ export default function StationDetailEntry() {
           <span style={{ fontWeight: 500 }}>日期</span>
           <DatePicker style={{ width: 140 }} placeholder="选择日期" onChange={(d) => setBatchDate(d ? d.format('YYYY-MM-DD') : '')} />
           <span style={{ fontWeight: 500, marginLeft: 8 }}>品号</span>
-          <Select style={{ width: 150 }} showSearch optionFilterProp="label" placeholder="选择品号" value={batchProductId} onChange={setBatchProductId} options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))} />
+          <Select style={{ width: 150 }} showSearch optionFilterProp="label" placeholder="选择品号" value={batchProductId} onChange={setBatchProductId} options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))} />
           <span style={{ fontWeight: 500, marginLeft: 8 }}>工站</span>
-          <Select style={{ width: 220 }} showSearch optionFilterProp="label" placeholder="选择工站" value={batchStationId} onChange={v => { setBatchStationId(v); setBatchRows([]); }} options={stations.map(s => ({ value: s.id, label: `${s.majorSection} / ${s.minorSection} / ${s.stationName}` }))} />
+          <Select style={{ width: 220 }} showSearch optionFilterProp="label" placeholder="选择工站" value={batchStationId} onChange={v => { setBatchStationId(v); setBatchRows([]); }} options={stations2.map(s => ({ value: s.id, label: `${s.majorSection} / ${s.minorSection} / ${s.stationName}` }))} />
         </div>
         {batchStationId && (
           <>

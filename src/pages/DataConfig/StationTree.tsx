@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Card, Table, Button, Form, Input, Switch, InputNumber, Select, Tag, Typography, message, Upload, Popconfirm, Space } from 'antd';
 import { PlusOutlined, CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, FileExcelOutlined, MenuOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -6,9 +6,9 @@ import * as XLSX from 'xlsx';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { mockStations, mockStationFields, getStationFieldOptions, ensureStationField, getFieldOptions } from '../../mockData';
+import { stationsApi, stationFieldsApi, defectFieldsApi } from '../../api';
 import SmartFilterBar, { applySmartFilters, type FilterCondition, type FilterField } from '../../components/SmartFilterBar';
-import type { Station } from '../../types';
+import type { Station, StationFieldOption, DefectFieldOption } from '../../types';
 
 const { Title } = Typography;
 
@@ -42,7 +42,10 @@ function SortableRow({ s, index }: { s: Station; index: number }) {
 }
 
 export default function StationTree() {
-  const [stations, setStations] = useState<Station[]>(mockStations);
+  const [stations, setStations] = useState<Station[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [stationFields, setStationFields] = useState<StationFieldOption[]>([]);
+  const [defectFields, setDefectFields] = useState<DefectFieldOption[]>([]);
   const [editingKey, setEditingKey] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
   const [editForm] = Form.useForm();
@@ -51,10 +54,46 @@ export default function StationTree() {
   const [searchText, setSearchText] = useState('');
   const [conditions, setConditions] = useState<FilterCondition[]>([{ field: 'isActive', op: 'include', values: ['启用'] }]);
 
-  const majorOptions = useMemo(() => getStationFieldOptions('majorSection'), []);
-  const minorOptions = useMemo(() => getStationFieldOptions('minorSection'), []);
-  const typeOptions = useMemo(() => getStationFieldOptions('stationType'), []);
-  const locationOptions = useMemo(() => getFieldOptions('location'), []);
+  const loadStations = async () => {
+    setLoading(true);
+    try {
+      const data = await stationsApi.list();
+      setStations(data);
+    } catch (e: any) {
+      message.error(e?.message || '加载失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStations();
+    stationFieldsApi.list().then(setStationFields).catch(() => {});
+    defectFieldsApi.list().then(setDefectFields).catch(() => {});
+  }, []);
+
+  function getStationFieldOptions(fieldType: StationFieldOption['fieldType']): string[] {
+    return stationFields.filter(f => f.fieldType === fieldType).map(f => f.name);
+  }
+
+  function getFieldOptions(fieldType: DefectFieldOption['fieldType']): string[] {
+    return defectFields.filter(f => f.fieldType === fieldType).map(f => f.name);
+  }
+
+  async function ensureStationField(fieldType: StationFieldOption['fieldType'], name: string) {
+    if (!name || !name.trim()) return;
+    if (!stationFields.some(f => f.fieldType === fieldType && f.name === name)) {
+      try {
+        const created = await stationFieldsApi.create({ fieldType, name });
+        setStationFields(prev => [...prev, created]);
+      } catch { /* best-effort */ }
+    }
+  }
+
+  const majorOptions = useMemo(() => getStationFieldOptions('majorSection'), [stationFields]);
+  const minorOptions = useMemo(() => getStationFieldOptions('minorSection'), [stationFields]);
+  const typeOptions = useMemo(() => getStationFieldOptions('stationType'), [stationFields]);
+  const locationOptions = useMemo(() => getFieldOptions('location'), [defectFields]);
 
   const filterFields: FilterField[] = [
     { key: 'majorSection', label: '大工段', type: 'text', options: majorOptions.map(v => ({ value: v, label: v })) },
@@ -67,29 +106,50 @@ export default function StationTree() {
       getValue: (s: Station) => s.isActive ? '启用' : '停用' },
   ];
 
-  function syncGlobal(u: Station[]) { mockStations.length = 0; mockStations.push(...u); }
   const isEditing = (id: number) => id === editingKey || (adding && id === -1);
   const edit = (r: Station) => { setEditingKey(r.id); setAdding(false); editForm.setFieldsValue(r); };
   const cancel = () => { setEditingKey(null); setAdding(false); editForm.resetFields(); };
   const add = () => { setAdding(true); setEditingKey(null); editForm.resetFields(); editForm.setFieldsValue({ isActive: true, isDataEntryType: true, sortOrder: 1 }); };
-  const del = (id: number) => { const u = stations.filter(s => s.id !== id); setStations(u); syncGlobal(u); message.success('已删除'); };
+
+  const del = async (id: number) => {
+    try {
+      await stationsApi.remove(id);
+      message.success('已删除');
+      loadStations();
+    } catch (e: any) {
+      message.error(e?.message || '删除失败');
+    }
+  };
 
   const saveEdit = async (id: number) => {
     const row = await editForm.validateFields();
-    ensureStationField('majorSection', row.majorSection); ensureStationField('minorSection', row.minorSection);
+    ensureStationField('majorSection', row.majorSection);
+    ensureStationField('minorSection', row.minorSection);
     const dup = stations.find(s => s.majorSection === row.majorSection && s.minorSection === row.minorSection && s.stationName === row.stationName && s.id !== id);
     if (dup) { message.error('该工站已存在'); return; }
-    setStations(prev => { const u = prev.map(s => s.id === id ? { ...s, ...row } : s); syncGlobal(u); return u; });
-    cancel(); message.success('已保存');
+    try {
+      await stationsApi.update(id, row);
+      cancel();
+      message.success('已保存');
+      loadStations();
+    } catch (e: any) {
+      message.error(e?.message || '保存失败');
+    }
   };
 
   const saveNew = async () => {
     const row = await editForm.validateFields();
-    ensureStationField('majorSection', row.majorSection); ensureStationField('minorSection', row.minorSection);
-    if (stations.some(s => s.majorSection === row.majorSection && s.minorSection === row.minorSection && s.stationName === row.stationName)) { message.error('已存在'); return; }
-    const maxId = stations.reduce((max, s) => Math.max(max, s.id), 0);
-    const u = [...stations, { id: maxId + 1, ...row, isActive: row.isActive ?? true, isDataEntryType: row.isDataEntryType ?? true }];
-    setStations(u); syncGlobal(u); cancel(); message.success('已新增');
+    ensureStationField('majorSection', row.majorSection);
+    ensureStationField('minorSection', row.minorSection);
+    if (stations.some(s => s.majorSection === row.majorSection && s.minorSection === row.minorSection && s.stationName === row.stationName)) { message.error('该工站已存在'); return; }
+    try {
+      await stationsApi.create({ ...row, isActive: row.isActive ?? true, isDataEntryType: row.isDataEntryType ?? true });
+      cancel();
+      message.success('已新增');
+      loadStations();
+    } catch (e: any) {
+      message.error(e?.message || '新增失败');
+    }
   };
 
   const filteredStations = useMemo(() => {
@@ -99,7 +159,7 @@ export default function StationTree() {
     return [...result].sort((a, b) => a.sortOrder - b.sortOrder);
   }, [stations, searchText, conditions]);
 
-  // --- 拖拽排序（本地） ---
+  // --- 拖拽排序 ---
   const activeStations = useMemo(() => stations.filter(s => s.isActive), [stations]);
   const [sortOrder, setSortOrder] = useState<Station[]>(() => [...activeStations].sort((a, b) => a.sortOrder - b.sortOrder));
   const [hasUnsaved, setHasUnsaved] = useState(false);
@@ -127,19 +187,18 @@ export default function StationTree() {
     }
   }, []);
 
-  const handleSaveSort = useCallback(() => {
-    const updated = stations.map(s => {
-      const newIdx = sortOrder.findIndex(so => so.id === s.id);
-      return { ...s, sortOrder: newIdx >= 0 ? newIdx + 1 : (s.isActive ? s.sortOrder : 9999) };
-    });
-    setStations(updated);
-    syncGlobal(updated);
-    setHasUnsaved(false);
-    // re-sync local after save
-    const active = updated.filter(s => s.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
-    setSortOrder(active);
-    message.success('排序已保存');
-  }, [sortOrder, stations, activeStations]);
+  const handleSaveSort = useCallback(async () => {
+    const items = sortOrder.map((s, i) => ({ id: s.id, sortOrder: i + 1 }));
+    try {
+      await stationsApi.reorder(items);
+      setHasUnsaved(false);
+      message.success('排序已保存');
+      loadStations();
+      setViewMode('table');
+    } catch (e: any) {
+      message.error(e?.message || '排序保存失败');
+    }
+  }, [sortOrder]);
 
   // --- 导出 ---
   const handleExport = () => {
@@ -157,11 +216,17 @@ export default function StationTree() {
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => { try {
+    reader.onload = async (ev) => { try {
       const wb = XLSX.read(ev.target?.result, { type: 'binary' }); const rows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets[wb.SheetNames[0]]);
-      let added = 0, skipped = 0; const maxId = stations.reduce((max, s) => Math.max(max, s.id), 0); const ns: Station[] = [...stations];
-      for (const row of rows) { const a=row['大工段']?.trim(),b=row['小工段']?.trim(),c=row['工站名称']?.trim(); if(!a||!b||!c) continue; if(ns.some(s=>s.majorSection===a&&s.minorSection===b&&s.stationName===c)){skipped++;continue;} ensureStationField('majorSection',a);ensureStationField('minorSection',b);if(row['工站类型'])ensureStationField('stationType',row['工站类型']); ns.push({id:maxId+1+added,majorSection:a,minorSection:b,stationName:c,stationType:row['工站类型']?.trim(),mesName:row['MES名称']?.trim(),abnormalPositions:row['异常位置']?.split(/[,，、]/).map(s=>s.trim()).filter(Boolean),sortOrder:Number(row['排序'])||0,isDataEntryType:row['数据录入']!=='否',isActive:row['状态']!=='停用'});added++; }
-      setStations(ns); syncGlobal(ns); message.success(`导入成功：新增 ${added} 条${skipped>0?`，跳过 ${skipped} 条重复`:''}`);
+      let added = 0, skipped = 0;
+      for (const row of rows) { const a=row['大工段']?.trim(),b=row['小工段']?.trim(),c=row['工站名称']?.trim(); if(!a||!b||!c) continue; if(stations.some(s=>s.majorSection===a&&s.minorSection===b&&s.stationName===c)){skipped++;continue;} ensureStationField('majorSection',a);ensureStationField('minorSection',b);if(row['工站类型'])ensureStationField('stationType',row['工站类型']);
+        try {
+          await stationsApi.create({ majorSection:a,minorSection:b,stationName:c,stationType:row['工站类型']?.trim(),mesName:row['MES名称']?.trim(),abnormalPositions:row['异常位置']?.split(/[,，、]/).map(s=>s.trim()).filter(Boolean),sortOrder:Number(row['排序'])||0,isDataEntryType:row['数据录入']!=='否',isActive:row['状态']!=='停用'});
+          added++;
+        } catch { skipped++; }
+      }
+      message.success(`导入成功：新增 ${added} 条${skipped>0?`，跳过 ${skipped} 条重复`:''}`);
+      loadStations();
     } catch { message.error('解析失败'); } };
     reader.readAsBinaryString(file); e.target.value = '';
   };
@@ -209,7 +274,7 @@ export default function StationTree() {
       {viewMode === 'table' ? (
         <Card title={<span>工站列表 ({filteredStations.length} 条) <SmartFilterBar fields={filterFields} searchText={searchText} onSearchChange={setSearchText} conditions={conditions} onConditionsChange={setConditions} /></span>}>
           <Form form={editForm} component={false}>
-            <Table dataSource={dataSource} columns={columnsArr} pagination={{ pageSize: 15, showTotal: t => `共 ${t} 条` }} size="small" />
+            <Table dataSource={dataSource} columns={columnsArr} pagination={{ pageSize: 15, showTotal: t => `共 ${t} 条` }} size="small" loading={loading} />
           </Form>
         </Card>
       ) : (
@@ -217,7 +282,7 @@ export default function StationTree() {
           extra={
             <Space>
               <Button onClick={() => setViewMode('table')}>取消</Button>
-              <Button type="primary" icon={<CheckOutlined />} onClick={() => { handleSaveSort(); setViewMode('table'); }} disabled={!hasUnsaved}>
+              <Button type="primary" icon={<CheckOutlined />} onClick={handleSaveSort} disabled={!hasUnsaved}>
                 保存排序{hasUnsaved ? ' *' : ''}
               </Button>
             </Space>

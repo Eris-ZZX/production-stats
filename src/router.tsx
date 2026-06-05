@@ -14,7 +14,8 @@ import StationTree from './pages/DataConfig/StationTree';
 import DefectCodes from './pages/DataConfig/DefectCodes';
 import DefectFieldMaintenance from './pages/DataConfig/DefectFieldMaintenance';
 import StationFieldMaintenance from './pages/DataConfig/StationFieldMaintenance';
-import ProductAdmin from './pages/DataConfig/ProductAdmin';
+import ProductLineManager from './pages/DataConfig/ProductLineManager';
+import AdminAccountManager from './pages/DataConfig/AdminAccountManager';
 import AdminLayout from './components/AdminLayout';
 
 export const router = createBrowserRouter([
@@ -43,7 +44,10 @@ export const router = createBrowserRouter([
     path: '/admin',
     element: <AdminLayout />,
     children: [
-      { path: 'product-admin', element: <ProductAdmin /> },
+      { path: 'product-lines', element: <ProductLineManager /> },
+      { path: 'station-fields', element: <StationFieldMaintenance /> },
+      { path: 'defect-fields', element: <DefectFieldMaintenance /> },
+      { path: 'accounts', element: <AdminAccountManager /> },
     ],
   },
 ]);

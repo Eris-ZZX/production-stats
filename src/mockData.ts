@@ -1,18 +1,14 @@
-import type { Product, Station, DefectCode, DefectFieldOption, StationFieldOption, ProductionRecord, InspectionRecord, YieldData, FpyData, TopDefect, TrendPoint, ProductLine, GlobalPreset } from './types';
+import type { Product, Station, DefectCode, DefectFieldOption, StationFieldOption, ProductionRecord, InspectionRecord, YieldData, FpyData, TopDefect, TrendPoint, ProductLine, AdminAccount } from './types';
 
 // ========== 产品线 ==========
 export const mockProductLines: ProductLine[] = [];
 
-// ========== 全局预置 ==========
-export const mockGlobalPreset: GlobalPreset = {
-  defaultMajorSectionIds: [],
-  defaultMinorSectionIds: [],
-  defaultStationTypeIds: [],
-  defaultComponentIds: [],
-  defaultTypeIds: [],
-  defaultLocationIds: [],
-  defaultDefectIds: [],
-};
+// ========== 后台管理员账号 ==========
+export const mockAdminAccounts: AdminAccount[] = [
+  { id: 1, username: 'admin', password: 'admin', role: 'super', isActive: true },
+  { id: 2, username: 'config', password: 'config', role: 'config', isActive: true },
+  { id: 3, username: 'viewer', password: 'viewer', role: 'viewer', isActive: true },
+];
 
 // ========== 品号 ==========
 export const mockProducts: Product[] = [];

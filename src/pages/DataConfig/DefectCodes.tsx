@@ -1,24 +1,61 @@
-import { useState, useMemo } from 'react';
-import { Card, Table, Button, Form, Input, Select, Switch, Tag, Typography, message, Row, Col, Upload, Tooltip, Popconfirm, Space } from 'antd';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { Card, Table, Button, Form, Input, Select, Switch, Tag, Typography, message, Upload, Popconfirm, Space } from 'antd';
 import { PlusOutlined, CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, FileExcelOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as XLSX from 'xlsx';
-import { mockDefects, ensureDefectField, getFieldOptions } from '../../mockData';
+import { defectCodesApi, defectFieldsApi } from '../../api';
 import SmartFilterBar, { applySmartFilters, type FilterCondition, type FilterField } from '../../components/SmartFilterBar';
-import type { DefectCode } from '../../types';
+import type { DefectCode, DefectFieldOption } from '../../types';
 
 const { Title } = Typography;
 
 export default function DefectCodes() {
-  const [defects, setDefects] = useState<DefectCode[]>(mockDefects);
+  const [defects, setDefects] = useState<DefectCode[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [defectFields, setDefectFields] = useState<DefectFieldOption[]>([]);
   const [editingKey, setEditingKey] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
   const [editForm] = Form.useForm();
 
-  const componentOptions = useMemo(() => getFieldOptions('component'), []);
-  const typeOptions = useMemo(() => getFieldOptions('type'), []);
-  const locationOptions = useMemo(() => getFieldOptions('location'), []);
-  const defectOptions = useMemo(() => getFieldOptions('defect'), []);
+  const loadDefects = async () => {
+    setLoading(true);
+    try {
+      const data = await defectCodesApi.list();
+      setDefects(data);
+    } catch (e: any) {
+      message.error(e?.message || '加载失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadFields = async () => {
+    try {
+      const data = await defectFieldsApi.list();
+      setDefectFields(data);
+    } catch { /* options loading can fail silently */ }
+  };
+
+  useEffect(() => { loadDefects(); loadFields(); }, []);
+
+  const getFieldOptions = useCallback((fieldType: DefectFieldOption['fieldType']): string[] => {
+    return defectFields.filter(f => f.fieldType === fieldType).map(f => f.name);
+  }, [defectFields]);
+
+  async function ensureDefectField(fieldType: DefectFieldOption['fieldType'], name: string) {
+    if (!name || !name.trim()) return;
+    if (!defectFields.some(f => f.fieldType === fieldType && f.name === name)) {
+      try {
+        const created = await defectFieldsApi.create({ fieldType, name });
+        setDefectFields(prev => [...prev, created]);
+      } catch { /* best-effort */ }
+    }
+  }
+
+  const componentOptions = useMemo(() => getFieldOptions('component'), [getFieldOptions]);
+  const typeOptions = useMemo(() => getFieldOptions('type'), [getFieldOptions]);
+  const locationOptions = useMemo(() => getFieldOptions('location'), [getFieldOptions]);
+  const defectOptions = useMemo(() => getFieldOptions('defect'), [getFieldOptions]);
 
   const [searchText, setSearchText] = useState('');
   const [conditions, setConditions] = useState<FilterCondition[]>([{ field: 'isActive', op: 'include', values: ['启用'] }]);
@@ -33,29 +70,54 @@ export default function DefectCodes() {
       getValue: (d: DefectCode) => d.isActive ? '启用' : '停用' },
   ];
 
-  function syncGlobal(u: DefectCode[]) { mockDefects.length = 0; mockDefects.push(...u); }
   const isEditing = (id: number) => id === editingKey || (adding && id === -1);
   const edit = (r: DefectCode) => { setEditingKey(r.id); setAdding(false); editForm.setFieldsValue(r); };
   const cancel = () => { setEditingKey(null); setAdding(false); editForm.resetFields(); };
   const genCode = () => { const maxNum = defects.reduce((max, d) => { const m = d.defectCode.match(/^D(\d+)$/); return m ? Math.max(max, parseInt(m[1], 10)) : max; }, 0); return `D${String(maxNum + 1).padStart(3, '0')}`; };
   const add = () => { setAdding(true); setEditingKey(null); editForm.resetFields(); };
-  const del = (id: number) => { const u = defects.filter(d => d.id !== id); setDefects(u); syncGlobal(u); message.success('已删除'); };
+
+  const del = async (id: number) => {
+    try {
+      await defectCodesApi.remove(id);
+      message.success('已删除');
+      loadDefects();
+    } catch (e: any) {
+      message.error(e?.message || '删除失败');
+    }
+  };
 
   const saveEdit = async (id: number) => {
     const row = await editForm.validateFields();
-    ensureDefectField('component', row.component); ensureDefectField('type', row.type); ensureDefectField('location', row.location); ensureDefectField('defect', row.defect);
+    ensureDefectField('component', row.component);
+    ensureDefectField('type', row.type);
+    ensureDefectField('location', row.location);
+    ensureDefectField('defect', row.defect);
     if (defects.some(d => d.id !== id && d.component === row.component && d.type === row.type && d.location === row.location && d.defect === row.defect)) { message.error('已存在'); return; }
-    setDefects(prev => { const u = prev.map(d => d.id === id ? { ...d, ...row } : d); syncGlobal(u); return u; });
-    cancel(); message.success('已保存');
+    try {
+      await defectCodesApi.update(id, row);
+      cancel();
+      message.success('已保存');
+      loadDefects();
+    } catch (e: any) {
+      message.error(e?.message || '保存失败');
+    }
   };
 
   const saveNew = async () => {
     const row = await editForm.validateFields();
-    ensureDefectField('component', row.component); ensureDefectField('type', row.type); ensureDefectField('location', row.location); ensureDefectField('defect', row.defect);
+    ensureDefectField('component', row.component);
+    ensureDefectField('type', row.type);
+    ensureDefectField('location', row.location);
+    ensureDefectField('defect', row.defect);
     if (defects.some(d => d.component === row.component && d.type === row.type && d.location === row.location && d.defect === row.defect)) { message.error('已存在'); return; }
-    const maxId = defects.reduce((max, d) => Math.max(max, d.id), 0);
-    const u = [...defects, { id: maxId + 1, ...row, defectCode: genCode(), isActive: true }];
-    setDefects(u); syncGlobal(u); cancel(); message.success('已新增');
+    try {
+      await defectCodesApi.create({ ...row, defectCode: genCode(), isActive: true });
+      cancel();
+      message.success('已新增');
+      loadDefects();
+    } catch (e: any) {
+      message.error(e?.message || '新增失败');
+    }
   };
 
   const filteredDefects = useMemo(() => applySmartFilters(defects, searchText, conditions, filterFields, [
@@ -74,11 +136,15 @@ export default function DefectCodes() {
   };
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader(); reader.onload = (ev) => { try {
+    const reader = new FileReader(); reader.onload = async (ev) => { try {
       const wb = XLSX.read(ev.target?.result, { type: 'binary' }); const rows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets[wb.SheetNames[0]]);
-      let added = 0; const nd = [...defects]; let curMax = nd.reduce((max, d) => { const m = d.defectCode.match(/^D(\d+)$/); return m ? Math.max(max, parseInt(m[1], 10)) : max; }, 0);
-      for (const row of rows) { const a=row['组件']?.trim(),b=row['类型']?.trim(),c=row['位置']?.trim(),e=row['缺陷描述']?.trim(); if(!a||!b||!c||!e)continue; if(nd.some(d=>d.component===a&&d.type===b&&d.location===c&&d.defect===e))continue; ensureDefectField('component',a);ensureDefectField('type',b);ensureDefectField('location',c);ensureDefectField('defect',e);curMax++;nd.push({id:Date.now()+added,defectCode:`D${String(curMax).padStart(3,'0')}`,component:a,type:b,location:c,defect:e,isActive:true});added++;}
-      setDefects(nd); syncGlobal(nd); message.success(`导入成功，新增 ${added} 条`);
+      let added = 0, skipped = 0; let curMax = defects.reduce((max, d) => { const m = d.defectCode.match(/^D(\d+)$/); return m ? Math.max(max, parseInt(m[1], 10)) : max; }, 0);
+      for (const row of rows) { const a=row['组件']?.trim(),b=row['类型']?.trim(),c=row['位置']?.trim(),e=row['缺陷描述']?.trim(); if(!a||!b||!c||!e)continue; if(defects.some(d=>d.component===a&&d.type===b&&d.location===c&&d.defect===e)){skipped++;continue;} ensureDefectField('component',a);ensureDefectField('type',b);ensureDefectField('location',c);ensureDefectField('defect',e);curMax++; try {
+        await defectCodesApi.create({ defectCode:`D${String(curMax).padStart(3,'0')}`,component:a,type:b,location:c,defect:e,isActive:true}); added++;
+      } catch { skipped++; }
+      }
+      message.success(`导入成功，新增 ${added} 条${skipped>0?`，跳过 ${skipped} 条`:''}`);
+      loadDefects();
     } catch { message.error('解析失败'); } }; reader.readAsBinaryString(file); e.target.value = '';
   };
 
@@ -110,7 +176,7 @@ export default function DefectCodes() {
 
       <Card title={<span>缺陷代码列表 ({filteredDefects.length} 条) <SmartFilterBar fields={filterFields} searchText={searchText} onSearchChange={setSearchText} conditions={conditions} onConditionsChange={setConditions} /></span>}>
         <Form form={editForm} component={false}>
-          <Table dataSource={dataSource} columns={columnsArr} pagination={{ pageSize: 15, showTotal: t => `共 ${t} 条` }} size="small" />
+          <Table dataSource={dataSource} columns={columnsArr} pagination={{ pageSize: 15, showTotal: t => `共 ${t} 条` }} size="small" loading={loading} />
         </Form>
       </Card>
     </div>

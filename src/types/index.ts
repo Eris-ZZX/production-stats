@@ -3,16 +3,21 @@ export interface ProductLine {
   id: number;
   name: string;
   isActive: boolean;
+  pwdRead?: string;    // 只读角色密码
+  pwdEntry?: string;   // 数据录入角色密码
+  pwdConfig?: string;  // 配置管理角色密码
 }
 
-export interface GlobalPreset {
-  defaultMajorSectionIds: number[];
-  defaultMinorSectionIds: number[];
-  defaultStationTypeIds: number[];
-  defaultComponentIds: number[];
-  defaultTypeIds: number[];
-  defaultLocationIds: number[];
-  defaultDefectIds: number[];
+export type AdminRole = 'super' | 'config' | 'viewer';
+
+export type ProductRole = 'read' | 'entry' | 'config';
+
+export interface AdminAccount {
+  id: number;
+  username: string;
+  password: string;
+  role: AdminRole;
+  isActive: boolean;
 }
 
 export interface Product {

@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, DatePicker, Select, Typography, Space, Radio } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { getDefectTrendData, mockProducts } from '../../mockData';
+import { dashboardApi, productLinesApi } from '../../api';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 dayjs.extend(isoWeek);
@@ -9,7 +9,6 @@ dayjs.extend(isoWeek);
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
 
-const activeProductIds = mockProducts.filter(p => p.status === 'active').map(p => p.id);
 const today = dayjs().format('YYYY-MM-DD');
 const twoWeeksAgo = dayjs().subtract(13, 'day').format('YYYY-MM-DD');
 
@@ -21,6 +20,10 @@ const GRANULARITY = [
 
 const colors = ['#f5222d', '#fa8c16', '#faad14', '#52c41a', '#1890ff', '#722ed1', '#eb2f96', '#13c2c2', '#2f54eb', '#a0d911',
   '#fa541c', '#9254de', '#36cfc9', '#d48806', '#cf1322'];
+
+interface ProductLine {
+  id: number; name: string; isActive: boolean;
+}
 
 function aggregateDefects(
   dates: string[],
@@ -63,15 +66,27 @@ function aggregateDefects(
 
 export default function DefectTrend() {
   const [dates, setDates] = useState<[string, string] | null>([twoWeeksAgo, today]);
-  const [productIds, setProductIds] = useState<number[]>(activeProductIds);
+  const [productIds, setProductIds] = useState<number[]>([]);
+  const [productLines, setProductLines] = useState<ProductLine[]>([]);
   const [selectedDefects, setSelectedDefects] = useState<string[]>([]);
   const [granularity, setGranularity] = useState<string>('day');
+  const [rawData, setRawData] = useState<{ dates: string[]; defects: any[] }>({ dates: [], defects: [] });
 
-  // always fetch TOP 15 so selection options are rich
-  const rawData = useMemo(() => {
-    if (productIds.length === 0) return { dates: [], defects: [] };
+  useEffect(() => {
+    productLinesApi.list().then((lines: ProductLine[]) => {
+      setProductLines(lines);
+      const activeIds = lines.filter(p => p.isActive).map(p => p.id);
+      if (activeIds.length > 0) setProductIds(activeIds);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (productIds.length === 0) { setRawData({ dates: [], defects: [] }); return; }
     const startDate = granularity !== 'day' ? dayjs(dates?.[0]).subtract(6, 'day').format('YYYY-MM-DD') : dates?.[0];
-    return getDefectTrendData(productIds, startDate, dates?.[1], 15);
+    const params: any = { productIds: productIds.join(','), topN: 15 };
+    if (startDate) params.startDate = startDate;
+    if (dates?.[1]) params.endDate = dates[1];
+    dashboardApi.defectTrend(params).then(data => setRawData(data));
   }, [productIds, dates, granularity]);
 
   const data = useMemo(() => {
@@ -116,7 +131,6 @@ export default function DefectTrend() {
     };
   }, [data]);
 
-  // all 15 defects as select options
   const defectOptions = useMemo(() => {
     const aggregated = aggregateDefects(rawData.dates, rawData.defects, granularity);
     return aggregated.defects.map(d => ({
@@ -133,7 +147,7 @@ export default function DefectTrend() {
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
             onChange={setProductIds} placeholder="选择品号（默认全选）"
-            options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))}
+            options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))}
             maxTagCount={4} />
           <span>时间区间:</span>
           <RangePicker size="small"

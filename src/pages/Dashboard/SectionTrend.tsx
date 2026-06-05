@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, DatePicker, Select, Typography, Space, Radio } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { getSectionTrendData, mockProducts } from '../../mockData';
+import { dashboardApi, productLinesApi } from '../../api';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 dayjs.extend(isoWeek);
@@ -9,7 +9,6 @@ dayjs.extend(isoWeek);
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
 
-const activeProductIds = mockProducts.filter(p => p.status === 'active').map(p => p.id);
 const today = dayjs().format('YYYY-MM-DD');
 const twoWeeksAgo = dayjs().subtract(13, 'day').format('YYYY-MM-DD');
 
@@ -28,6 +27,10 @@ const GRANULARITY = [
 
 const SECTION_COLORS: Record<string, string> = { '组装': '#1890ff', '测试': '#52c41a', '包装': '#fa8c16' };
 const SECTION_COLORS_LIST = ['#1890ff', '#52c41a', '#fa8c16', '#722ed1', '#eb2f96', '#13c2c2'];
+
+interface ProductLine {
+  id: number; name: string; isActive: boolean;
+}
 
 function aggregateSections(
   dates: string[],
@@ -76,15 +79,29 @@ function aggregateSections(
 
 export default function SectionTrend() {
   const [dates, setDates] = useState<[string, string] | null>([twoWeeksAgo, today]);
-  const [productIds, setProductIds] = useState<number[]>(activeProductIds);
+  const [productIds, setProductIds] = useState<number[]>([]);
+  const [productLines, setProductLines] = useState<ProductLine[]>([]);
   const [defectType, setDefectType] = useState<string | undefined>(undefined);
   const [granularity, setGranularity] = useState<string>('day');
   const [selectedSections, setSelectedSections] = useState<string[]>([]);
+  const [rawData, setRawData] = useState<{ dates: string[]; sections: any[] }>({ dates: [], sections: [] });
 
-  const rawData = useMemo(() => {
-    if (productIds.length === 0) return { dates: [], sections: [] };
+  useEffect(() => {
+    productLinesApi.list().then((lines: ProductLine[]) => {
+      setProductLines(lines);
+      const activeIds = lines.filter(p => p.isActive).map(p => p.id);
+      if (activeIds.length > 0) setProductIds(activeIds);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (productIds.length === 0) { setRawData({ dates: [], sections: [] }); return; }
     const startDate = granularity !== 'day' ? dayjs(dates?.[0]).subtract(6, 'day').format('YYYY-MM-DD') : dates?.[0];
-    return getSectionTrendData(productIds, startDate, dates?.[1], defectType);
+    const params: any = { productIds: productIds.join(',') };
+    if (startDate) params.startDate = startDate;
+    if (dates?.[1]) params.endDate = dates[1];
+    if (defectType) params.defectType = defectType;
+    dashboardApi.sectionTrend(params).then(data => setRawData(data));
   }, [productIds, dates, defectType, granularity]);
 
   const data = useMemo(() => aggregateSections(rawData.dates, rawData.sections, granularity),
@@ -135,7 +152,7 @@ export default function SectionTrend() {
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
             onChange={setProductIds} placeholder="选择品号（默认全选）"
-            options={mockProducts.filter(p => p.status === 'active').map(p => ({ value: p.id, label: p.code }))}
+            options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))}
             maxTagCount={4} />
           <span>时间区间:</span>
           <RangePicker size="small"

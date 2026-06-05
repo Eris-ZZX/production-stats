@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "match": "git commit",
+        "prompt": "Before committing, review the changes being committed against CLAUDE.md. If the changes introduce new modules, restructure routes, alter data layer patterns, modify FPY calculation, add/remove key components, or change the defect/station hierarchy — update CLAUDE.md to reflect these changes. If no architectural changes, just proceed with the commit silently."
+      }
+    ]
+  }
+}
