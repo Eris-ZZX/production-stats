@@ -17,6 +17,10 @@ export const productLinesApi = {
   create: (data: any) => apiPost<any>(`${BASE}/product-lines`, data),
   update: (id: number, data: any) => apiPut<any>(`${BASE}/product-lines/${id}`, data),
   remove: (id: number) => apiDelete<any>(`${BASE}/product-lines/${id}`),
+  listSkus: (productLineId?: number) => apiGet<any[]>(productLineId ? `${BASE}/product-lines/${productLineId}/skus` : `${BASE}/product-lines/skus/all`),
+  createSku: (data: { productLineId: number; code: string }) => apiPost<any>(`${BASE}/product-lines/skus`, data),
+  updateSku: (id: number, data: any) => apiPut<any>(`${BASE}/product-lines/skus/${id}`, data),
+  removeSku: (id: number) => apiDelete<any>(`${BASE}/product-lines/skus/${id}`),
 };
 
 // ===== Stations =====
@@ -106,18 +110,18 @@ export const adminAccountsApi = {
 
 // ===== Dashboard =====
 export const dashboardApi = {
-  stationFpy: (params: { productIds?: string; startDate?: string; endDate?: string }) =>
+  stationFpy: (params: { skuIds?: string; startDate?: string; endDate?: string }) =>
     apiGet<any[]>(`${BASE}/dashboard/station-fpy?${new URLSearchParams(params as any)}`),
-  sectionFpy: (params: { productIds?: string; startDate?: string; endDate?: string }) =>
+  sectionFpy: (params: { skuIds?: string; startDate?: string; endDate?: string }) =>
     apiGet<any[]>(`${BASE}/dashboard/section-fpy?${new URLSearchParams(params as any)}`),
-  fqcFpy: (params: { productIds?: string; startDate?: string; endDate?: string }) =>
+  fqcFpy: (params: { skuIds?: string; startDate?: string; endDate?: string }) =>
     apiGet<any[]>(`${BASE}/dashboard/fqc-fpy?${new URLSearchParams(params as any)}`),
-  topDefects: (params: { section: string; productIds?: string; startDate?: string; endDate?: string; defectType?: string; topN?: number }) =>
+  topDefects: (params: { section: string; skuIds?: string; startDate?: string; endDate?: string; defectType?: string; topN?: number }) =>
     apiGet<any[]>(`${BASE}/dashboard/top-defects?${new URLSearchParams(params as any)}`),
-  stationTrend: (params: { productIds?: string; startDate?: string; endDate?: string; defectType?: string }) =>
+  stationTrend: (params: { skuIds?: string; startDate?: string; endDate?: string; defectType?: string }) =>
     apiGet<any>(`${BASE}/dashboard/station-trend?${new URLSearchParams(params as any)}`),
-  sectionTrend: (params: { productIds?: string; startDate?: string; endDate?: string; defectType?: string }) =>
+  sectionTrend: (params: { skuIds?: string; startDate?: string; endDate?: string; defectType?: string }) =>
     apiGet<any>(`${BASE}/dashboard/section-trend?${new URLSearchParams(params as any)}`),
-  defectTrend: (params: { productIds?: string; startDate?: string; endDate?: string; topN?: number }) =>
+  defectTrend: (params: { skuIds?: string; startDate?: string; endDate?: string; topN?: number }) =>
     apiGet<any>(`${BASE}/dashboard/defect-trend?${new URLSearchParams(params as any)}`),
 };

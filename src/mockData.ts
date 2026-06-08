@@ -524,8 +524,6 @@ export function getDefectTrendData(
       const n = detailRecs.filter(r => r.recordDate === date && r.defectCode === code).reduce((sum, r) => sum + r.qty, 0);
       return n || 0;
     });
-    const totalCount = countData.reduce((a, b) => a + b, 0);
-    const rateData = countData.map(c => totalCount > 0 ? Number((c / totalCount * 100).toFixed(1)) : 0);
     return { defectName: name, component: d?.component || '', count: countData };
   });
 

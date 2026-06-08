@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Card, DatePicker, Select, Typography, Tag, Space, Radio } from 'antd';
+import { Card, DatePicker, Select, Typography, Space, Radio } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { dashboardApi, productLinesApi } from '../../api';
 import dayjs from 'dayjs';
@@ -27,9 +27,6 @@ const GRANULARITY = [
 
 const colors = ['#1890ff', '#52c41a', '#fa8c16', '#722ed1', '#eb2f96', '#13c2c2', '#f5222d', '#2f54eb', '#faad14', '#a0d911'];
 
-interface ProductLine {
-  id: number; name: string; isActive: boolean;
-}
 
 function aggregateByGranularity(
   dates: string[],
@@ -77,17 +74,16 @@ function aggregateByGranularity(
 }
 
 export default function StationTrend() {
-  const [dates, setDates] = useState<[string, string] | null>([twoWeeksAgo, today]);
-  const [productIds, setProductIds] = useState<number[]>([]);
-  const [productLines, setProductLines] = useState<ProductLine[]>([]);
+  const [dates, setDates] = useState<[string, string] | null>(() => { const saved = sessionStorage.getItem('dashboard-dates'); if (saved) { try { const p = JSON.parse(saved); if (p?.[0] && p?.[1]) return p; } catch {} } return [twoWeeksAgo, today]; });  const [productIds, setProductIds] = useState<number[]>([]);
+  const [skus, setSkus] = useState<any[]>([]);
   const [defectType, setDefectType] = useState<string | undefined>(undefined);
   const [selectedStationIds, setSelectedStationIds] = useState<number[]>([]);
   const [granularity, setGranularity] = useState<string>('day');
   const [rawData, setRawData] = useState<{ dates: string[]; stations: any[] }>({ dates: [], stations: [] });
 
   useEffect(() => {
-    productLinesApi.list().then((lines: ProductLine[]) => {
-      setProductLines(lines);
+    productLinesApi.listSkus().then((lines: any[]) => {
+      setSkus(lines);
       const activeIds = lines.filter(p => p.isActive).map(p => p.id);
       if (activeIds.length > 0) setProductIds(activeIds);
     });
@@ -96,7 +92,7 @@ export default function StationTrend() {
   useEffect(() => {
     if (productIds.length === 0) { setRawData({ dates: [], stations: [] }); return; }
     const startDate = granularity !== 'day' ? dayjs(dates?.[0]).subtract(6, 'day').format('YYYY-MM-DD') : dates?.[0];
-    const params: any = { productIds: productIds.join(',') };
+    const params: any = { skuIds: productIds.join(',') };
     if (startDate) params.startDate = startDate;
     if (dates?.[1]) params.endDate = dates[1];
     if (defectType) params.defectType = defectType;
@@ -151,12 +147,12 @@ export default function StationTrend() {
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
             onChange={setProductIds} placeholder="选择品号（默认全选）"
-            options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))}
+            options={skus.filter(s => s.isActive).map(s => ({ value: s.id, label: s.code }))}
             maxTagCount={4} />
           <span>时间区间:</span>
           <RangePicker size="small"
             value={dates?.[0] && dates?.[1] ? [dayjs(dates[0]), dayjs(dates[1])] : undefined}
-            onChange={(_d, ds) => setDates(ds?.[0] && ds?.[1] ? [ds[0], ds[1]] : null)} />
+            onChange={(_d, ds) => { const d = ds?.[0] && ds?.[1] ? [ds[0], ds[1]] as [string,string] : null; setDates(d); sessionStorage.setItem('dashboard-dates', JSON.stringify(d)); }} />
           <span>粒度:</span>
           <Radio.Group size="small" value={granularity} onChange={e => setGranularity(e.target.value)}>
             {GRANULARITY.map(g => <Radio.Button key={g.value} value={g.value}>{g.label}</Radio.Button>)}

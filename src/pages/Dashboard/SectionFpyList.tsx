@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, Table, DatePicker, Select, Typography, Tag, Space } from 'antd';
 import { dashboardApi, productLinesApi } from '../../api';
 import type { ColumnsType } from 'antd/es/table';
@@ -9,9 +9,6 @@ const { RangePicker } = DatePicker;
 
 const fpyColor = (v: number, t: number) => v >= t ? 'green' : v >= t - 2 ? 'orange' : 'red';
 
-interface ProductLine {
-  id: number; name: string; isActive: boolean;
-}
 
 interface SectionRow {
   majorSection: string;
@@ -26,15 +23,14 @@ interface FqcRow {
 }
 
 export default function SectionFpyList() {
-  const [dates, setDates] = useState<[string, string] | null>(['2026-06-01', '2026-06-03']);
-  const [productIds, setProductIds] = useState<number[]>([]);
-  const [productLines, setProductLines] = useState<ProductLine[]>([]);
+  const [dates, setDates] = useState<[string, string] | null>(() => { const saved = sessionStorage.getItem('dashboard-dates'); if (saved) { try { const p = JSON.parse(saved); if (p?.[0] && p?.[1]) return p; } catch {} } return ['2026-06-01', '2026-06-03']; });  const [productIds, setProductIds] = useState<number[]>([]);
+  const [skus, setSkus] = useState<any[]>([]);
   const [data, setData] = useState<SectionRow[]>([]);
   const [fqcData, setFqcData] = useState<FqcRow[]>([]);
 
   useEffect(() => {
-    productLinesApi.list().then((lines: ProductLine[]) => {
-      setProductLines(lines);
+    productLinesApi.listSkus().then((lines: any[]) => {
+      setSkus(lines);
       const activeIds = lines.filter(p => p.isActive).map(p => p.id);
       if (activeIds.length > 0) setProductIds(activeIds);
     });
@@ -42,7 +38,7 @@ export default function SectionFpyList() {
 
   useEffect(() => {
     if (productIds.length === 0) { setData([]); setFqcData([]); return; }
-    const params: any = { productIds: productIds.join(',') };
+    const params: any = { skuIds: productIds.join(',') };
     if (dates?.[0]) params.startDate = dates[0];
     if (dates?.[1]) params.endDate = dates[1];
     dashboardApi.sectionFpy(params).then(d => setData(d));
@@ -72,7 +68,7 @@ export default function SectionFpyList() {
     ];
     return (
       <Card key={title} title={title} style={{ flex: 1, minWidth: 0 }}>
-        <Table dataSource={data.map((d, i) => ({ ...d, key: i }))} columns={cols} pagination={false} size="small" />
+        <Table scroll={{ x: 'max-content' }} dataSource={data.map((d, i) => ({ ...d, key: i }))} columns={cols} pagination={false} size="small" />
       </Card>
     );
   };
@@ -100,7 +96,7 @@ export default function SectionFpyList() {
     ];
     return (
       <Card key={title} title={title} style={{ flex: 1, minWidth: 0 }}>
-        <Table dataSource={fqcData.map((d, i) => ({ ...d, key: i }))} columns={cols} pagination={false} size="small" />
+        <Table scroll={{ x: 'max-content' }} dataSource={fqcData.map((d, i) => ({ ...d, key: i }))} columns={cols} pagination={false} size="small" />
       </Card>
     );
   };
@@ -113,12 +109,12 @@ export default function SectionFpyList() {
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
             onChange={setProductIds} placeholder="选择品号（默认全选）"
-            options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))}
+            options={skus.filter(s => s.isActive).map(s => ({ value: s.id, label: s.code }))}
             maxTagCount={4} />
           <span>时间区间:</span>
           <RangePicker size="small"
             value={dates?.[0] && dates?.[1] ? [dayjs(dates[0]), dayjs(dates[1])] : undefined}
-            onChange={(_d, ds) => setDates(ds?.[0] && ds?.[1] ? [ds[0], ds[1]] : null)} />
+            onChange={(_d, ds) => { const d = ds?.[0] && ds?.[1] ? [ds[0], ds[1]] as [string,string] : null; setDates(d); sessionStorage.setItem('dashboard-dates', JSON.stringify(d)); }} />
         </Space>
       </Card>
       <div style={{ display: 'flex', gap: 12 }}>

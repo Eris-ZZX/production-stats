@@ -35,7 +35,6 @@ function SortableRow({ s, index }: { s: Station; index: number }) {
       <td style={{ width: 70 }}>{s.stationType ? <Tag>{s.stationType}</Tag> : '-'}</td>
       <td style={{ width: 100 }}>{s.mesName || '-'}</td>
       <td style={{ width: 120 }}>{s.abnormalPositions?.length ? s.abnormalPositions.map(p => <Tag key={p} color="red">{p}</Tag>) : '-'}</td>
-      <td style={{ width: 60 }}><Tag color={s.isDataEntryType ? 'green' : 'default'}>{s.isDataEntryType ? '是' : '否'}</Tag></td>
       <td style={{ width: 70 }}><Tag color="green">启用</Tag></td>
     </tr>
   );
@@ -202,33 +201,44 @@ export default function StationTree() {
 
   // --- 导出 ---
   const handleExport = () => {
-    const data = filteredStations.map(s => ({ '排序': s.sortOrder, '大工段': s.majorSection, '小工段': s.minorSection, '工站名称': s.stationName, '工站类型': s.stationType || '', 'MES名称': s.mesName || '', '异常位置': (s.abnormalPositions || []).join(', '), '数据录入': s.isDataEntryType ? '是' : '否', '状态': s.isActive ? '启用' : '停用' }));
+    const data = filteredStations.map(s => ({ '排序': s.sortOrder, '大工段': s.majorSection, '小工段': s.minorSection, '工站名称': s.stationName, '工站类型': s.stationType || '', 'MES名称': s.mesName || '', '异常位置': (s.abnormalPositions || []).join(', '), '状态': s.isActive ? '启用' : '停用' }));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), '工站层级');
     XLSX.writeFile(wb, '工站层级数据.xlsx'); message.success('导出成功');
   };
 
   const handleDownloadTemplate = () => {
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ '大工段': '组装', '小工段': '前段组装', '工站名称': '示例', '工站类型': '制程', 'MES名称': 'ASSY-XXX', '异常位置': '位置A, 位置B', '排序': 0, '数据录入': '是', '状态': '启用' }]), '模板');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ '大工段': '组装', '小工段': '前段组装', '工站名称': '示例', '工站类型': '必过工站', 'MES名称': 'ASSY-XXX', '异常位置': '位置A, 位置B', '排序': 0, '状态': '启用' }]), '模板');
     XLSX.writeFile(wb, '工站导入模板.xlsx'); message.success('模板已下载');
   };
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => { try {
-      const wb = XLSX.read(ev.target?.result, { type: 'binary' }); const rows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets[wb.SheetNames[0]]);
+  const handleImport = async (file: File) => {
+    try {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: 'array' });
+      const rows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets[wb.SheetNames[0]]);
       let added = 0, skipped = 0;
-      for (const row of rows) { const a=row['大工段']?.trim(),b=row['小工段']?.trim(),c=row['工站名称']?.trim(); if(!a||!b||!c) continue; if(stations.some(s=>s.majorSection===a&&s.minorSection===b&&s.stationName===c)){skipped++;continue;} ensureStationField('majorSection',a);ensureStationField('minorSection',b);if(row['工站类型'])ensureStationField('stationType',row['工站类型']);
+      for (const row of rows) {
+        const a = row['大工段']?.trim(), b = row['小工段']?.trim(), c = row['工站名称']?.trim();
+        if (!a || !b || !c) continue;
+        if (stations.some(s => s.majorSection === a && s.minorSection === b && s.stationName === c)) { skipped++; continue; }
+        ensureStationField('majorSection', a); ensureStationField('minorSection', b);
+        if (row['工站类型']) ensureStationField('stationType', row['工站类型']);
         try {
-          await stationsApi.create({ majorSection:a,minorSection:b,stationName:c,stationType:row['工站类型']?.trim(),mesName:row['MES名称']?.trim(),abnormalPositions:row['异常位置']?.split(/[,，、]/).map(s=>s.trim()).filter(Boolean),sortOrder:Number(row['排序'])||0,isDataEntryType:row['数据录入']!=='否',isActive:row['状态']!=='停用'});
+          await stationsApi.create({
+            majorSection: a, minorSection: b, stationName: c,
+            stationType: row['工站类型']?.trim() || '',
+            mesName: row['MES名称']?.trim() || '',
+            abnormalPositions: (row['异常位置'] || '').split(/[,，、]/).map(s => s.trim()).filter(Boolean),
+            sortOrder: Number(row['排序']) || 0,
+            isActive: row['状态'] !== '停用',
+          });
           added++;
         } catch { skipped++; }
       }
-      message.success(`导入成功：新增 ${added} 条${skipped>0?`，跳过 ${skipped} 条重复`:''}`);
+      message.success(`导入成功：新增 ${added} 条${skipped > 0 ? `，跳过 ${skipped} 条` : ''}`);
       loadStations();
-    } catch { message.error('解析失败'); } };
-    reader.readAsBinaryString(file); e.target.value = '';
+    } catch { message.error('解析失败，请检查文件格式'); }
   };
 
   const makeInput = (name: string, opts?: string[]) => opts
@@ -243,7 +253,7 @@ export default function StationTree() {
     { title: '类型', dataIndex: 'stationType', key: 'st', width: 100, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="stationType" style={{ margin: 0 }}><Select size="small" style={{ width: 130 }} options={typeOptions.map(v => ({ value: v, label: v }))} /></Form.Item> : r.stationType ? <Tag>{r.stationType}</Tag> : '-' },
     { title: 'MES', dataIndex: 'mesName', key: 'mn', width: 100, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="mesName" style={{ margin: 0 }}><Input size="small" style={{ width: 100 }} /></Form.Item> : r.mesName || '-' },
     { title: '异常位置', dataIndex: 'abnormalPositions', key: 'ap', width: 120, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="abnormalPositions" style={{ margin: 0 }}><Select size="small" mode="multiple" allowClear style={{ width: 140 }} options={locationOptions.map(v => ({ value: v, label: v }))} /></Form.Item> : (r.abnormalPositions?.length ? r.abnormalPositions.map(p => <Tag key={p} color="red">{p}</Tag>) : '-') },
-    { title: '录入', dataIndex: 'isDataEntryType', key: 'de', width: 60, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="isDataEntryType" style={{ margin: 0 }} valuePropName="checked"><Switch size="small" checkedChildren="是" unCheckedChildren="否" /></Form.Item> : <Tag color={r.isDataEntryType ? 'green' : 'default'}>{r.isDataEntryType ? '是' : '否'}</Tag> },
+    { title: '录入', dataIndex: 'isDataEntryType', key: 'de', width: 60, render: (_: unknown, r: Station) => <Tag color={r.isDataEntryType ? 'green' : 'default'}>{r.isDataEntryType ? '是' : '否'}</Tag> },
     { title: '状态', dataIndex: 'isActive', key: 'ia', width: 70, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="isActive" style={{ margin: 0 }} valuePropName="checked"><Switch size="small" checkedChildren="启用" unCheckedChildren="停用" /></Form.Item> : <Tag color={r.isActive ? 'green' : 'default'}>{r.isActive ? '启用' : '停用'}</Tag> },
     { title: '操作', key: 'ac', width: 140, render: (_: unknown, r: Station) => isEditing(r.id) ? <Space size={4}><Button type="link" size="small" icon={<CheckOutlined />} onClick={() => r.id === -1 ? saveNew() : saveEdit(r.id)}>保存</Button><Button type="link" size="small" icon={<CloseOutlined />} onClick={cancel}>取消</Button></Space> : <Space size={4}><Button type="link" size="small" icon={<EditOutlined />} onClick={() => edit(r)}>编辑</Button><Popconfirm title="确定删除?" onConfirm={() => del(r.id)}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
@@ -258,7 +268,7 @@ export default function StationTree() {
         <Space>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出</Button>
           <Button icon={<FileExcelOutlined />} onClick={handleDownloadTemplate}>模板</Button>
-          <Upload accept=".xlsx,.xls" showUploadList={false} beforeUpload={() => false} onChange={handleImport as any}><Button icon={<UploadOutlined />}>导入</Button></Upload>
+          <Upload accept=".xlsx,.xls" showUploadList={false} beforeUpload={(file) => { handleImport(file); return false; }}><Button icon={<UploadOutlined />}>导入</Button></Upload>
           <Button
             icon={viewMode === 'sort' ? <UnorderedListOutlined /> : <MenuOutlined />}
             onClick={() => viewMode === 'sort' ? setViewMode('table') : enterSortView()}
@@ -274,7 +284,7 @@ export default function StationTree() {
       {viewMode === 'table' ? (
         <Card title={<span>工站列表 ({filteredStations.length} 条) <SmartFilterBar fields={filterFields} searchText={searchText} onSearchChange={setSearchText} conditions={conditions} onConditionsChange={setConditions} /></span>}>
           <Form form={editForm} component={false}>
-            <Table dataSource={dataSource} columns={columnsArr} pagination={{ pageSize: 15, showTotal: t => `共 ${t} 条` }} size="small" loading={loading} />
+            <Table scroll={{ x: 'max-content' }} dataSource={dataSource} columns={columnsArr} pagination={{ pageSize: 15, showTotal: t => `共 ${t} 条` }} size="small" loading={loading} />
           </Form>
         </Card>
       ) : (
@@ -301,7 +311,6 @@ export default function StationTree() {
                       <th style={{ width: 70, padding: '8px 4px', textAlign: 'left' }}>类型</th>
                       <th style={{ width: 100, padding: '8px 4px', textAlign: 'left' }}>MES</th>
                       <th style={{ width: 120, padding: '8px 4px', textAlign: 'left' }}>异常位置</th>
-                      <th style={{ width: 60, padding: '8px 4px', textAlign: 'left' }}>录入</th>
                       <th style={{ width: 70, padding: '8px 4px', textAlign: 'left' }}>状态</th>
                     </tr>
                   </thead>

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Card, Table, Button, Form, Input, Select, Switch, Tag, Typography, message, Upload, Popconfirm, Space } from 'antd';
+import { Card, Table, Button, Form, Select, Switch, Tag, Typography, message, Upload, Popconfirm, Space } from 'antd';
 import { PlusOutlined, CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, FileExcelOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as XLSX from 'xlsx';
@@ -134,18 +134,27 @@ export default function DefectCodes() {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ '组件': '左耳', '类型': '外观', '位置': '屏幕', '缺陷描述': '示例描述' }]), '模板');
     XLSX.writeFile(wb, '缺陷代码导入模板.xlsx'); message.success('模板已下载');
   };
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader(); reader.onload = async (ev) => { try {
-      const wb = XLSX.read(ev.target?.result, { type: 'binary' }); const rows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets[wb.SheetNames[0]]);
-      let added = 0, skipped = 0; let curMax = defects.reduce((max, d) => { const m = d.defectCode.match(/^D(\d+)$/); return m ? Math.max(max, parseInt(m[1], 10)) : max; }, 0);
-      for (const row of rows) { const a=row['组件']?.trim(),b=row['类型']?.trim(),c=row['位置']?.trim(),e=row['缺陷描述']?.trim(); if(!a||!b||!c||!e)continue; if(defects.some(d=>d.component===a&&d.type===b&&d.location===c&&d.defect===e)){skipped++;continue;} ensureDefectField('component',a);ensureDefectField('type',b);ensureDefectField('location',c);ensureDefectField('defect',e);curMax++; try {
-        await defectCodesApi.create({ defectCode:`D${String(curMax).padStart(3,'0')}`,component:a,type:b,location:c,defect:e,isActive:true}); added++;
-      } catch { skipped++; }
+  const handleImport = async (file: File) => {
+    try {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: 'array' });
+      const rows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets[wb.SheetNames[0]]);
+      let added = 0, skipped = 0;
+      let curMax = defects.reduce((max, d) => { const m = d.defectCode.match(/^D(\d+)$/); return m ? Math.max(max, parseInt(m[1], 10)) : max; }, 0);
+      for (const row of rows) {
+        const a = row['组件']?.trim(), b = row['类型']?.trim(), c = row['位置']?.trim(), e = row['缺陷描述']?.trim();
+        if (!a || !b || !c || !e) continue;
+        if (defects.some(d => d.component === a && d.type === b && d.location === c && d.defect === e)) { skipped++; continue; }
+        ensureDefectField('component', a); ensureDefectField('type', b); ensureDefectField('location', c); ensureDefectField('defect', e);
+        curMax++;
+        try {
+          await defectCodesApi.create({ defectCode: `D${String(curMax).padStart(3, '0')}`, component: a, type: b, location: c, defect: e, isActive: true });
+          added++;
+        } catch { skipped++; }
       }
-      message.success(`导入成功，新增 ${added} 条${skipped>0?`，跳过 ${skipped} 条`:''}`);
+      message.success(`导入成功，新增 ${added} 条${skipped > 0 ? `，跳过 ${skipped} 条` : ''}`);
       loadDefects();
-    } catch { message.error('解析失败'); } }; reader.readAsBinaryString(file); e.target.value = '';
+    } catch { message.error('解析失败，请检查文件格式'); }
   };
 
   const newDefect: DefectCode = { id: -1, defectCode: '', component: '', type: '', location: '', defect: '', isActive: true };
@@ -169,14 +178,14 @@ export default function DefectCodes() {
         <Space>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出</Button>
           <Button icon={<FileExcelOutlined />} onClick={handleDownloadTemplate}>模板</Button>
-          <Upload accept=".xlsx,.xls" showUploadList={false} beforeUpload={() => false} onChange={handleImport as any}><Button icon={<UploadOutlined />}>导入</Button></Upload>
+          <Upload accept=".xlsx,.xls" showUploadList={false} beforeUpload={(file) => { handleImport(file); return false; }}><Button icon={<UploadOutlined />}>导入</Button></Upload>
           <Button type="primary" icon={<PlusOutlined />} onClick={add} disabled={adding}>新增缺陷（自动编号）</Button>
         </Space>
       </div>
 
       <Card title={<span>缺陷代码列表 ({filteredDefects.length} 条) <SmartFilterBar fields={filterFields} searchText={searchText} onSearchChange={setSearchText} conditions={conditions} onConditionsChange={setConditions} /></span>}>
         <Form form={editForm} component={false}>
-          <Table dataSource={dataSource} columns={columnsArr} pagination={{ pageSize: 15, showTotal: t => `共 ${t} 条` }} size="small" loading={loading} />
+          <Table scroll={{ x: 'max-content' }} dataSource={dataSource} columns={columnsArr} pagination={{ pageSize: 15, showTotal: t => `共 ${t} 条` }} size="small" loading={loading} />
         </Form>
       </Card>
     </div>

@@ -15,8 +15,13 @@ router.get('/', requireAdmin, (req, res) => {
 router.post('/', requireAdmin, (req, res) => {
   if ((req as any).adminRole !== 'super') { res.status(403).json({ error: '权限不足' }); return; }
   const { username, password, role } = req.body;
-  const result = db.prepare('INSERT INTO admin_accounts (username, password, role) VALUES (?,?,?)').run(username, password, role);
-  res.json({ id: result.lastInsertRowid });
+  try {
+    const result = db.prepare('INSERT INTO admin_accounts (username, password, role) VALUES (?,?,?)').run(username, password, role);
+    res.json({ id: result.lastInsertRowid });
+  } catch (e: any) {
+    if (e.message?.includes('UNIQUE')) res.status(409).json({ error: '账号已存在' });
+    else { res.status(500).json({ error: e.message }); }
+  }
 });
 
 router.put('/:id', requireAdmin, (req, res) => {

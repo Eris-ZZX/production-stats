@@ -119,7 +119,7 @@ export default function ProductLineManager() {
       </div>
       <Card>
         <Form form={editForm} component={false}>
-          <Table dataSource={dataSource} columns={columns} pagination={false} size="small" loading={loading} />
+          <Table scroll={{ x: 'max-content' }} dataSource={dataSource} columns={columns} pagination={false} size="small" loading={loading} />
         </Form>
       </Card>
     </div>

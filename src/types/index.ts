@@ -62,6 +62,7 @@ export interface StationFieldOption {
   id: number;
   fieldType: 'majorSection' | 'minorSection' | 'stationType';
   name: string;
+  sortOrder?: number;
   isDataEntry?: boolean;  // 仅 stationType 有效：是否数据录入类
   visualFpyTarget?: number;      // 仅 majorSection 有效：外观FPY目标
   functionalFpyTarget?: number;  // 仅 majorSection 有效：功能FPY目标

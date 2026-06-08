@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireProduct } from '../auth.js';
+import { requireAnyAuth } from '../auth.js';
 
 const router = Router();
 
-router.get('/', requireProduct, (_req, res) => {
+router.get('/', requireAnyAuth, (_req, res) => {
   const rows = db.prepare('SELECT * FROM defect_codes ORDER BY defect_code').all();
   res.json((rows as any[]).map(r => ({
     id: r.id, defectCode: r.defect_code, component: r.component,
@@ -12,15 +12,20 @@ router.get('/', requireProduct, (_req, res) => {
   })));
 });
 
-router.post('/', requireProduct, (req, res) => {
+router.post('/', requireAnyAuth, (req, res) => {
   const r = req.body;
-  const result = db.prepare(
-    'INSERT INTO defect_codes (defect_code, component, type, location, defect, is_active) VALUES (?,?,?,?,?,?)'
-  ).run(r.defectCode, r.component, r.type, r.location, r.defect, r.isActive ? 1 : 0);
-  res.json({ id: result.lastInsertRowid });
+  try {
+    const result = db.prepare(
+      'INSERT INTO defect_codes (defect_code, component, type, location, defect, is_active) VALUES (?,?,?,?,?,?)'
+    ).run(r.defectCode, r.component, r.type, r.location, r.defect, r.isActive ? 1 : 0);
+    res.json({ id: result.lastInsertRowid });
+  } catch (e: any) {
+    if (e.message?.includes('UNIQUE')) res.status(409).json({ error: '缺陷代码已存在' });
+    else { res.status(500).json({ error: e.message }); }
+  }
 });
 
-router.put('/:id', requireProduct, (req, res) => {
+router.put('/:id', requireAnyAuth, (req, res) => {
   const r = req.body;
   db.prepare(
     'UPDATE defect_codes SET defect_code=?, component=?, type=?, location=?, defect=?, is_active=? WHERE id=?'
@@ -28,7 +33,7 @@ router.put('/:id', requireProduct, (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id', requireProduct, (req, res) => {
+router.delete('/:id', requireAnyAuth, (req, res) => {
   db.prepare('DELETE FROM defect_codes WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });

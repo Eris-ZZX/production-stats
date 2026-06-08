@@ -1,11 +1,16 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import type { ProductRole } from '../types';
 import { productLinesApi } from '../api';
-import { getProductToken, getProductAuths, addProductAuth, clearProductAuth } from '../api/client';
+import { getProductAuths, addProductAuth, clearProductAuth } from '../api/client';
+
+interface ProductSku {
+  id: number; productLineId: number; productName?: string; code: string; isActive: boolean;
+}
 
 interface ProductContextType {
   currentProduct: { id: number; name: string } | null;
   products: { id: number; name: string; isActive: boolean }[];
+  skus: ProductSku[];
   currentRole: ProductRole | null;
   setCurrentProduct: (p: { id: number; name: string }) => void;
   loginProduct: (productId: number, role: ProductRole, productName: string) => void;
@@ -14,25 +19,27 @@ interface ProductContextType {
 }
 
 const ProductContext = createContext<ProductContextType>({
-  currentProduct: null, products: [], currentRole: null,
+  currentProduct: null, products: [], skus: [], currentRole: null,
   setCurrentProduct: () => {}, loginProduct: () => {}, logoutProduct: () => {}, refresh: () => {},
 });
 
 export function ProductProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
+  const [skus, setSkus] = useState<ProductSku[]>([]);
   const [currentProduct, setCurrentProduct] = useState<{ id: number; name: string } | null>(null);
   const [currentRole, setCurrentRole] = useState<ProductRole | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const list = await productLinesApi.list();
+      const [list, allSkus] = await Promise.all([
+        productLinesApi.list(),
+        productLinesApi.listSkus().catch(() => []),
+      ]);
       setProducts(list);
-    } catch {
-      // Product lines list is public, can fail silently
-    }
+      setSkus(allSkus || []);
+    } catch { /* ignore */ }
   }, []);
 
-  // Restore last auth on mount
   useEffect(() => {
     const auths = getProductAuths();
     if (auths.length > 0) {
@@ -50,15 +57,13 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logoutProduct = useCallback(() => {
-    if (currentProduct) {
-      clearProductAuth(currentProduct.id);
-    }
+    if (currentProduct) clearProductAuth(currentProduct.id);
     setCurrentProduct(null);
     setCurrentRole(null);
   }, [currentProduct]);
 
   return (
-    <ProductContext.Provider value={{ currentProduct, products, currentRole, setCurrentProduct, loginProduct, logoutProduct, refresh }}>
+    <ProductContext.Provider value={{ currentProduct, products, skus, currentRole, setCurrentProduct, loginProduct, logoutProduct, refresh }}>
       {children}
     </ProductContext.Provider>
   );

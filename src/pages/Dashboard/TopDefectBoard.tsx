@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Card, Table, DatePicker, Select, Typography, Tag, Space, Popover } from 'antd';
-import { dashboardApi, productLinesApi } from '../../api';
+import { dashboardApi, productLinesApi, stationsApi } from '../../api';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
-
-const SECTIONS = ['组装', '测试', '包装'];
 
 const TYPES = [
   { key: '外观', label: '外观', color: 'blue' },
@@ -19,9 +17,6 @@ const FQC_TYPES = [
   { key: '功能', label: 'FQC功能', color: 'purple' },
 ];
 
-interface ProductLine {
-  id: number; name: string; isActive: boolean;
-}
 
 const columns = [
   { title: '#', key: 'rank', width: 40, render: (_: unknown, __: unknown, i: number) => <Tag color={i < 3 ? 'red' : 'default'}>{i + 1}</Tag> },
@@ -50,32 +45,42 @@ const columns = [
 ];
 
 export default function TopDefectBoard() {
-  const [dates, setDates] = useState<[string, string] | null>(['2026-06-01', '2026-06-03']);
-  const [productIds, setProductIds] = useState<number[]>([]);
-  const [productLines, setProductLines] = useState<ProductLine[]>([]);
+  const [dates, setDates] = useState<[string, string] | null>(() => { const saved = sessionStorage.getItem('dashboard-dates'); if (saved) { try { const p = JSON.parse(saved); if (p?.[0] && p?.[1]) return p; } catch {} } return ['2026-06-01', '2026-06-03']; });  const [productIds, setProductIds] = useState<number[]>([]);
+  const [skus, setSkus] = useState<any[]>([]);
+  const [sections, setSections] = useState<string[]>([]);
   const [defectData, setDefectData] = useState<Record<string, any[]>>({});
-  const [activeTabs, setActiveTabs] = useState<Record<string, string>>({ '外观': '组装', '功能': '组装', '气密性': '组装' });
-  const [activeFqcTabs, setActiveFqcTabs] = useState<Record<string, string>>({ '外观': '组装', '功能': '组装' });
-
+  const [activeTabs, setActiveTabs] = useState<Record<string, string>>({ '外观': '', '功能': '', '气密性': '' });
+  // 加载品号列表
   useEffect(() => {
-    productLinesApi.list().then((lines: ProductLine[]) => {
-      setProductLines(lines);
+    productLinesApi.listSkus().then((lines: any[]) => {
+      setSkus(lines);
       const activeIds = lines.filter(p => p.isActive).map(p => p.id);
       if (activeIds.length > 0) setProductIds(activeIds);
     });
   }, []);
 
+  // 从工站数据中提取大工段列表
   useEffect(() => {
-    if (productIds.length === 0) { setDefectData({}); return; }
-    const pidStr = productIds.join(',');
+    stationsApi.list().then((stations: any[]) => {
+      const names = [...new Set(stations.map((s: any) => s.majorSection).filter(Boolean))];
+      setSections(names);
+      if (names.length > 0) {
+        const first = names[0];
+        setActiveTabs({ '外观': first, '功能': first, '气密性': first });
+      }
+    }).catch(() => {});
+  }, []);
 
-    // Fetch all section + FQC combos so tab-switching is instant
-    const sectionKeys = SECTIONS.map(s => ({ key: s, section: s }));
-    const fqcKeys = FQC_TYPES.map(t => ({ key: `FQC-${t.key}`, section: 'FQC' as string, defectType: t.key }));
+  useEffect(() => {
+    if (productIds.length === 0 || sections.length === 0) { setDefectData({}); return; }
+    const pidStr = productIds.join(',');
+    const sectionKeys: { key: string; section: string; defectType?: string }[] = [];
+    sections.forEach(s => TYPES.forEach(t => sectionKeys.push({ key: `${t.key}-${s}`, section: s, defectType: t.key })));
+    const fqcKeys: { key: string; section: string; defectType?: string }[] = FQC_TYPES.map(t => ({ key: `FQC-${t.key}`, section: 'FQC', defectType: t.key }));
 
     Promise.all(
       [...sectionKeys, ...fqcKeys].map(k => {
-        const params: any = { section: k.section, productIds: pidStr, topN: 10 };
+        const params: any = { section: k.section, skuIds: pidStr, topN: 10 };
         if (dates?.[0]) params.startDate = dates[0];
         if (dates?.[1]) params.endDate = dates[1];
         if (k.defectType) params.defectType = k.defectType;
@@ -85,8 +90,8 @@ export default function TopDefectBoard() {
       const map: Record<string, any[]> = {};
       results.forEach(([key, data]) => { map[key] = data; });
       setDefectData(map);
-    });
-  }, [productIds, dates]);
+    }).catch(() => {});
+  }, [productIds, dates, sections]);
 
   const filterCard = (
     <Card key="filter" style={{ marginBottom: 12 }} bodyStyle={{ padding: '12px 16px' }}>
@@ -94,12 +99,12 @@ export default function TopDefectBoard() {
         <span>品号:</span>
         <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
           onChange={setProductIds} placeholder="选择品号（默认全选）"
-          options={productLines.filter(p => p.isActive).map(p => ({ value: p.id, label: p.name }))}
+          options={skus.filter(s => s.isActive).map(s => ({ value: s.id, label: s.code }))}
           maxTagCount={4} />
         <span>时间区间:</span>
         <RangePicker size="small"
           value={dates?.[0] && dates?.[1] ? [dayjs(dates[0]), dayjs(dates[1])] : undefined}
-          onChange={(_d, ds) => setDates(ds?.[0] && ds?.[1] ? [ds[0], ds[1]] : null)} />
+          onChange={(_d, ds) => { const d = ds?.[0] && ds?.[1] ? [ds[0], ds[1]] as [string,string] : null; setDates(d); sessionStorage.setItem('dashboard-dates', JSON.stringify(d)); }} />
       </Space>
     </Card>
   );
@@ -115,7 +120,7 @@ export default function TopDefectBoard() {
               <Tag color={t.color} style={{ fontSize: 14 }}>{t.key}</Tag>
               <div style={{ width: 1, height: 20, background: '#d9d9d9', margin: '0 8px' }} />
               <div style={{ display: 'flex', marginLeft: 0 }}>
-                {SECTIONS.map(s => (
+                {sections.map(s => (
                   <Tag key={s}
                     color={activeTabs[t.key] === s ? 'blue' : 'default'}
                     style={{ cursor: 'pointer', opacity: activeTabs[t.key] === s ? 1 : 0.6 }}
@@ -126,29 +131,19 @@ export default function TopDefectBoard() {
             </div>
           }>
           <Table
-            dataSource={(defectData[activeTabs[t.key]] || []).map((d: any, i: number) => ({ ...d, key: i }))}
+scroll={{ x: 'max-content' }}             dataSource={(defectData[`${t.key}-${activeTabs[t.key]}`] || []).map((d: any, i: number) => ({ ...d, key: i }))}
             columns={columns} pagination={false} size="small" />
         </Card>
       ))}
       {FQC_TYPES.map(t => (
-        <Card key={t.key} style={{ marginBottom: 12 }}
+        <Card key={`fqc-${t.key}`} style={{ marginBottom: 12 }}
           title={
             <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
               <Tag color={t.color} style={{ fontSize: 14 }}>{t.label}</Tag>
-              <div style={{ width: 1, height: 20, background: '#d9d9d9', margin: '0 8px' }} />
-              <div style={{ display: 'flex', marginLeft: 0 }}>
-                {SECTIONS.map(s => (
-                  <Tag key={s}
-                    color={activeFqcTabs[t.key] === s ? 'blue' : 'default'}
-                    style={{ cursor: 'pointer', opacity: activeFqcTabs[t.key] === s ? 1 : 0.6 }}
-                    onClick={() => setActiveFqcTabs(prev => ({ ...prev, [t.key]: s }))}
-                  >{s}</Tag>
-                ))}
-              </div>
             </div>
           }>
           <Table
-            dataSource={(defectData[`FQC-${t.key}`] || []).map((d: any, i: number) => ({ ...d, key: i }))}
+scroll={{ x: 'max-content' }}             dataSource={(defectData[`FQC-${t.key}`] || []).map((d: any, i: number) => ({ ...d, key: i }))}
             columns={columns} pagination={false} size="small" />
         </Card>
       ))}

@@ -7,25 +7,25 @@ const router = Router();
 // ===== 工站 FPY =====
 router.get('/station-fpy', optionalProduct, (req, res) => {
   const productId = (req as any).productId;
-  const { productIds, startDate, endDate } = req.query;
-  const pIds = productIds ? String(productIds).split(',').map(Number) : (productId ? [productId] : []);
+  const { skuIds, startDate, endDate } = req.query;
+  const sIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [] : []);
 
-  let prodSql = 'SELECT station_id, SUM(output_qty) as total_output FROM production_records WHERE 1=1';
-  let detailSql = 'SELECT station_id, defect_type, SUM(qty) as qty FROM station_detail_records WHERE 1=1';
+  let prodSql = 'SELECT pr.station_id, SUM(pr.output_qty) as total_output FROM production_records pr JOIN product_skus ps ON pr.product_sku_id = ps.id WHERE 1=1';
+  let detailSql = 'SELECT sr.station_id, sr.defect_type, SUM(sr.qty) as qty FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE 1=1';
   const pParams: any[] = [];
   const dParams: any[] = [];
 
-  if (pIds.length > 0) {
-    const ph = pIds.map(() => '?').join(',');
-    prodSql += ` AND product_id IN (${ph})`;
-    detailSql += ` AND product_id IN (${ph})`;
-    pParams.push(...pIds);
-    dParams.push(...pIds);
+  if (sIds.length > 0) {
+    const ph = sIds.map(() => '?').join(',');
+    prodSql += ` AND ps.id IN (${ph})`;
+    detailSql += ` AND ps.id IN (${ph})`;
+    pParams.push(...sIds);
+    dParams.push(...sIds);
   }
-  if (startDate) { prodSql += ' AND record_date >= ?'; pParams.push(startDate); detailSql += ' AND record_date >= ?'; dParams.push(startDate); }
-  if (endDate) { prodSql += ' AND record_date <= ?'; pParams.push(endDate); detailSql += ' AND record_date <= ?'; dParams.push(endDate); }
-  prodSql += ' GROUP BY station_id';
-  detailSql += ' GROUP BY station_id, defect_type';
+  if (startDate) { prodSql += ' AND pr.record_date >= ?'; pParams.push(startDate); detailSql += ' AND sr.record_date >= ?'; dParams.push(startDate); }
+  if (endDate) { prodSql += ' AND pr.record_date <= ?'; pParams.push(endDate); detailSql += ' AND sr.record_date <= ?'; dParams.push(endDate); }
+  prodSql += ' GROUP BY pr.station_id';
+  detailSql += ' GROUP BY sr.station_id, sr.defect_type';
 
   const prodRows = db.prepare(prodSql).all(...pParams) as any[];
   const detailRows = db.prepare(detailSql).all(...dParams) as any[];
@@ -68,20 +68,20 @@ router.get('/station-fpy', optionalProduct, (req, res) => {
 // ===== 工段 FPY =====
 router.get('/section-fpy', optionalProduct, (req, res) => {
   const productId = (req as any).productId;
-  const { productIds, startDate, endDate } = req.query;
-  const pIds = productIds ? String(productIds).split(',').map(Number) : (productId ? [productId] : []);
+  const { skuIds, startDate, endDate } = req.query;
+  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
 
   // Get station FPY first (excluding FQC)
-  let prodSql = 'SELECT s.id, s.major_section, SUM(pr.output_qty) as total_output FROM production_records pr JOIN stations s ON pr.station_id = s.id WHERE s.station_type != ?';
+  let prodSql = 'SELECT s.id, s.major_section, SUM(pr.output_qty) as total_output FROM production_records pr JOIN stations s ON pr.station_id = s.id JOIN product_skus ps ON pr.product_sku_id = ps.id WHERE s.station_type != ?';
   const params: any[] = ['FQC'];
-  if (pIds.length > 0) { prodSql += ` AND pr.product_id IN (${pIds.map(() => '?').join(',')})`; params.push(...pIds); }
+  if (pIds.length > 0) { prodSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; params.push(...pIds); }
   if (startDate) { prodSql += ' AND pr.record_date >= ?'; params.push(startDate); }
   if (endDate) { prodSql += ' AND pr.record_date <= ?'; params.push(endDate); }
   prodSql += ' GROUP BY s.id, s.major_section';
 
-  let detailSql = 'SELECT s.id, s.major_section, sr.defect_type, SUM(sr.qty) as qty FROM station_detail_records sr JOIN stations s ON sr.station_id = s.id WHERE s.station_type != ?';
+  let detailSql = 'SELECT s.id, s.major_section, sr.defect_type, SUM(sr.qty) as qty FROM station_detail_records sr JOIN stations s ON sr.station_id = s.id JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE s.station_type != ?';
   const dParams: any[] = ['FQC'];
-  if (pIds.length > 0) { detailSql += ` AND sr.product_id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
+  if (pIds.length > 0) { detailSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
   if (startDate) { detailSql += ' AND sr.record_date >= ?'; dParams.push(startDate); }
   if (endDate) { detailSql += ' AND sr.record_date <= ?'; dParams.push(endDate); }
   detailSql += ' GROUP BY s.id, s.major_section, sr.defect_type';
@@ -120,7 +120,9 @@ router.get('/section-fpy', optionalProduct, (req, res) => {
     s.totalOutput += r.total_output;
   });
 
-  const fields = db.prepare("SELECT * FROM station_field_options WHERE field_type = 'majorSection'").all() as any[];
+  const fieldsTable = productId ? 'product_station_fields' : 'station_field_options';
+  const fieldsWhere = productId ? `field_type = 'majorSection' AND product_line_id = ${productId}` : "field_type = 'majorSection'";
+  const fields = db.prepare(`SELECT * FROM ${fieldsTable} WHERE ${fieldsWhere}`).all() as any[];
 
   const result = [...secMap.entries()].map(([name, d]) => {
     const targets = fields.find((f: any) => f.name === name);
@@ -142,19 +144,19 @@ router.get('/section-fpy', optionalProduct, (req, res) => {
 // ===== FQC FPY =====
 router.get('/fqc-fpy', optionalProduct, (req, res) => {
   const productId = (req as any).productId;
-  const { productIds, startDate, endDate } = req.query;
-  const pIds = productIds ? String(productIds).split(',').map(Number) : (productId ? [productId] : []);
+  const { skuIds, startDate, endDate } = req.query;
+  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
 
-  let prodSql = 'SELECT s.id, s.major_section, SUM(pr.output_qty) as total_output FROM production_records pr JOIN stations s ON pr.station_id = s.id WHERE s.station_type = ?';
+  let prodSql = 'SELECT s.id, s.major_section, SUM(pr.output_qty) as total_output FROM production_records pr JOIN stations s ON pr.station_id = s.id JOIN product_skus ps ON pr.product_sku_id = ps.id WHERE s.station_type = ?';
   const params: any[] = ['FQC'];
-  if (pIds.length > 0) { prodSql += ` AND pr.product_id IN (${pIds.map(() => '?').join(',')})`; params.push(...pIds); }
+  if (pIds.length > 0) { prodSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; params.push(...pIds); }
   if (startDate) { prodSql += ' AND pr.record_date >= ?'; params.push(startDate); }
   if (endDate) { prodSql += ' AND pr.record_date <= ?'; params.push(endDate); }
   prodSql += ' GROUP BY s.id, s.major_section';
 
-  let detailSql = 'SELECT s.id, s.major_section, sr.defect_type, SUM(sr.qty) as qty FROM station_detail_records sr JOIN stations s ON sr.station_id = s.id WHERE s.station_type = ?';
+  let detailSql = 'SELECT s.id, s.major_section, sr.defect_type, SUM(sr.qty) as qty FROM station_detail_records sr JOIN stations s ON sr.station_id = s.id JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE s.station_type = ?';
   const dParams: any[] = ['FQC'];
-  if (pIds.length > 0) { detailSql += ` AND sr.product_id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
+  if (pIds.length > 0) { detailSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
   if (startDate) { detailSql += ' AND sr.record_date >= ?'; dParams.push(startDate); }
   if (endDate) { detailSql += ' AND sr.record_date <= ?'; dParams.push(endDate); }
   detailSql += ' GROUP BY s.id, s.major_section, sr.defect_type';
@@ -201,8 +203,8 @@ router.get('/fqc-fpy', optionalProduct, (req, res) => {
 // ===== TOP 缺陷排名 =====
 router.get('/top-defects', optionalProduct, (req, res) => {
   const productId = (req as any).productId;
-  const { productIds, startDate, endDate, section, defectType, topN } = req.query;
-  const pIds = productIds ? String(productIds).split(',').map(Number) : (productId ? [productId] : []);
+  const { skuIds, startDate, endDate, section, defectType, topN } = req.query;
+  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
   const top = parseInt(String(topN)) || 10;
 
   let filterSql = '';
@@ -216,9 +218,9 @@ router.get('/top-defects', optionalProduct, (req, res) => {
     params.push('FQC');
   }
 
-  let detailSql = 'SELECT sr.defect_code, SUM(sr.qty) as count FROM station_detail_records sr JOIN stations s ON sr.station_id = s.id WHERE 1=1';
+  let detailSql = 'SELECT sr.defect_code, SUM(sr.qty) as count FROM station_detail_records sr JOIN stations s ON sr.station_id = s.id JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE 1=1';
   detailSql += filterSql;
-  if (pIds.length > 0) { detailSql += ` AND sr.product_id IN (${pIds.map(() => '?').join(',')})`; params.push(...pIds); }
+  if (pIds.length > 0) { detailSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; params.push(...pIds); }
   if (startDate) { detailSql += ' AND sr.record_date >= ?'; params.push(startDate); }
   if (endDate) { detailSql += ' AND sr.record_date <= ?'; params.push(endDate); }
   if (defectType) { detailSql += ' AND sr.defect_type = ?'; params.push(defectType); }
@@ -232,7 +234,7 @@ router.get('/top-defects', optionalProduct, (req, res) => {
   const defects = db.prepare('SELECT * FROM defect_codes').all() as any[];
 
   // For output: get all production records in range
-  let outputSql = 'SELECT pr.station_id, SUM(pr.output_qty) as total_output FROM production_records pr ';
+  let outputSql = 'SELECT pr.station_id, SUM(pr.output_qty) as total_output FROM production_records pr JOIN product_skus ps ON pr.product_sku_id = ps.id ';
   if (section && section !== 'FQC') {
     outputSql += 'JOIN stations s ON pr.station_id = s.id WHERE s.major_section = ?';
   } else if (section === 'FQC') {
@@ -241,7 +243,7 @@ router.get('/top-defects', optionalProduct, (req, res) => {
     outputSql += 'WHERE 1=1';
   }
   const oParams: any[] = section && section !== 'FQC' ? [section] : section === 'FQC' ? ['FQC'] : [];
-  if (pIds.length > 0) { outputSql += ` AND pr.product_id IN (${pIds.map(() => '?').join(',')})`; oParams.push(...pIds); }
+  if (pIds.length > 0) { outputSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; oParams.push(...pIds); }
   if (startDate) { outputSql += ' AND pr.record_date >= ?'; oParams.push(startDate); }
   if (endDate) { outputSql += ' AND pr.record_date <= ?'; oParams.push(endDate); }
   outputSql += ' GROUP BY pr.station_id';
@@ -254,12 +256,12 @@ router.get('/top-defects', optionalProduct, (req, res) => {
   const result = rows.map((r: any) => {
     const d = defects.find((x: any) => x.defect_code === r.defect_code);
     // Find which stations have this defect
-    let stSql = 'SELECT DISTINCT station_id FROM station_detail_records WHERE defect_code = ?';
+    let stSql = 'SELECT DISTINCT sr.station_id FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE sr.defect_code = ?';
     const stParams: any[] = [r.defect_code];
-    if (pIds.length > 0) { stSql += ` AND product_id IN (${pIds.map(() => '?').join(',')})`; stParams.push(...pIds); }
-    if (startDate) { stSql += ' AND record_date >= ?'; stParams.push(startDate); }
-    if (endDate) { stSql += ' AND record_date <= ?'; stParams.push(endDate); }
-    if (defectType) { stSql += ' AND defect_type = ?'; stParams.push(defectType); }
+    if (pIds.length > 0) { stSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; stParams.push(...pIds); }
+    if (startDate) { stSql += ' AND sr.record_date >= ?'; stParams.push(startDate); }
+    if (endDate) { stSql += ' AND sr.record_date <= ?'; stParams.push(endDate); }
+    if (defectType) { stSql += ' AND sr.defect_type = ?'; stParams.push(defectType); }
     const stRows = db.prepare(stSql).all(...stParams) as any[];
     const stationIds = stRows.map((sr: any) => sr.station_id);
 
@@ -295,29 +297,29 @@ router.get('/top-defects', optionalProduct, (req, res) => {
 // ===== 工站趋势 =====
 router.get('/station-trend', optionalProduct, (req, res) => {
   const productId = (req as any).productId;
-  const { productIds, startDate, endDate, defectType } = req.query;
-  const pIds = productIds ? String(productIds).split(',').map(Number) : (productId ? [productId] : []);
+  const { skuIds, startDate, endDate, defectType } = req.query;
+  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
 
   // Get stations
   const stations = db.prepare("SELECT * FROM stations WHERE is_active = 1 AND station_type != 'FQC' ORDER BY sort_order").all() as any[];
 
   // Production per date per station
-  let prodSql = 'SELECT record_date, station_id, SUM(output_qty) as total_output FROM production_records WHERE 1=1';
+  let prodSql = 'SELECT pr.record_date, pr.station_id, SUM(pr.output_qty) as total_output FROM production_records pr JOIN product_skus ps ON pr.product_sku_id = ps.id WHERE 1=1';
   const pParams: any[] = [];
-  if (pIds.length > 0) { prodSql += ` AND product_id IN (${pIds.map(() => '?').join(',')})`; pParams.push(...pIds); }
-  if (startDate) { prodSql += ' AND record_date >= ?'; pParams.push(startDate); }
-  if (endDate) { prodSql += ' AND record_date <= ?'; pParams.push(endDate); }
-  prodSql += ' GROUP BY record_date, station_id ORDER BY record_date';
+  if (pIds.length > 0) { prodSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; pParams.push(...pIds); }
+  if (startDate) { prodSql += ' AND pr.record_date >= ?'; pParams.push(startDate); }
+  if (endDate) { prodSql += ' AND pr.record_date <= ?'; pParams.push(endDate); }
+  prodSql += ' GROUP BY pr.record_date, pr.station_id ORDER BY pr.record_date';
   const prodMap = new Map<string, number>();
   (db.prepare(prodSql).all(...pParams) as any[]).forEach((r: any) => prodMap.set(`${r.record_date}|${r.station_id}`, r.total_output));
 
-  let detailSql = 'SELECT record_date, station_id, SUM(qty) as qty FROM station_detail_records WHERE 1=1';
+  let detailSql = 'SELECT sr.record_date, sr.station_id, SUM(sr.qty) as qty FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE 1=1';
   const dParams: any[] = [];
-  if (pIds.length > 0) { detailSql += ` AND product_id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
-  if (startDate) { detailSql += ' AND record_date >= ?'; dParams.push(startDate); }
-  if (endDate) { detailSql += ' AND record_date <= ?'; dParams.push(endDate); }
-  if (defectType) { detailSql += ' AND defect_type = ?'; dParams.push(defectType); }
-  detailSql += ' GROUP BY record_date, station_id ORDER BY record_date';
+  if (pIds.length > 0) { detailSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
+  if (startDate) { detailSql += ' AND sr.record_date >= ?'; dParams.push(startDate); }
+  if (endDate) { detailSql += ' AND sr.record_date <= ?'; dParams.push(endDate); }
+  if (defectType) { detailSql += ' AND sr.defect_type = ?'; dParams.push(defectType); }
+  detailSql += ' GROUP BY sr.record_date, sr.station_id ORDER BY sr.record_date';
   const detailMap = new Map<string, number>();
   (db.prepare(detailSql).all(...dParams) as any[]).forEach((r: any) => detailMap.set(`${r.record_date}|${r.station_id}`, r.qty));
 
@@ -345,27 +347,27 @@ router.get('/station-trend', optionalProduct, (req, res) => {
 router.get('/section-trend', optionalProduct, (req, res) => {
   // Reuse station trend and aggregate by section
   const productId = (req as any).productId;
-  const { productIds, startDate, endDate, defectType } = req.query;
-  const pIds = productIds ? String(productIds).split(',').map(Number) : (productId ? [productId] : []);
+  const { skuIds, startDate, endDate, defectType } = req.query;
+  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
 
   const stations = db.prepare("SELECT * FROM stations WHERE is_active = 1 AND station_type != 'FQC' ORDER BY sort_order").all() as any[];
 
-  let prodSql = 'SELECT record_date, station_id, SUM(output_qty) as total_output FROM production_records WHERE 1=1';
+  let prodSql = 'SELECT pr.record_date, pr.station_id, SUM(pr.output_qty) as total_output FROM production_records pr JOIN product_skus ps ON pr.product_sku_id = ps.id WHERE 1=1';
   const pParams: any[] = [];
-  if (pIds.length > 0) { prodSql += ` AND product_id IN (${pIds.map(() => '?').join(',')})`; pParams.push(...pIds); }
-  if (startDate) { prodSql += ' AND record_date >= ?'; pParams.push(startDate); }
-  if (endDate) { prodSql += ' AND record_date <= ?'; pParams.push(endDate); }
-  prodSql += ' GROUP BY record_date, station_id ORDER BY record_date';
+  if (pIds.length > 0) { prodSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; pParams.push(...pIds); }
+  if (startDate) { prodSql += ' AND pr.record_date >= ?'; pParams.push(startDate); }
+  if (endDate) { prodSql += ' AND pr.record_date <= ?'; pParams.push(endDate); }
+  prodSql += ' GROUP BY pr.record_date, pr.station_id ORDER BY pr.record_date';
   const prodMap = new Map<string, number>();
   (db.prepare(prodSql).all(...pParams) as any[]).forEach((r: any) => prodMap.set(`${r.record_date}|${r.station_id}`, r.total_output));
 
-  let detailSql = 'SELECT record_date, station_id, SUM(qty) as qty FROM station_detail_records WHERE 1=1';
+  let detailSql = 'SELECT sr.record_date, sr.station_id, SUM(sr.qty) as qty FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE 1=1';
   const dParams: any[] = [];
-  if (pIds.length > 0) { detailSql += ` AND product_id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
-  if (startDate) { detailSql += ' AND record_date >= ?'; dParams.push(startDate); }
-  if (endDate) { detailSql += ' AND record_date <= ?'; dParams.push(endDate); }
-  if (defectType) { detailSql += ' AND defect_type = ?'; dParams.push(defectType); }
-  detailSql += ' GROUP BY record_date, station_id ORDER BY record_date';
+  if (pIds.length > 0) { detailSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
+  if (startDate) { detailSql += ' AND sr.record_date >= ?'; dParams.push(startDate); }
+  if (endDate) { detailSql += ' AND sr.record_date <= ?'; dParams.push(endDate); }
+  if (defectType) { detailSql += ' AND sr.defect_type = ?'; dParams.push(defectType); }
+  detailSql += ' GROUP BY sr.record_date, sr.station_id ORDER BY sr.record_date';
   const detailMap = new Map<string, number>();
   (db.prepare(detailSql).all(...dParams) as any[]).forEach((r: any) => detailMap.set(`${r.record_date}|${r.station_id}`, r.qty));
 
@@ -406,28 +408,28 @@ router.get('/section-trend', optionalProduct, (req, res) => {
 // ===== 缺陷趋势 =====
 router.get('/defect-trend', optionalProduct, (req, res) => {
   const productId = (req as any).productId;
-  const { productIds, startDate, endDate, topN } = req.query;
-  const pIds = productIds ? String(productIds).split(',').map(Number) : (productId ? [productId] : []);
+  const { skuIds, startDate, endDate, topN } = req.query;
+  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
   const top = parseInt(String(topN)) || 15;
 
   // Get top defect codes
-  let topSql = 'SELECT defect_code, SUM(qty) as total FROM station_detail_records WHERE 1=1';
+  let topSql = 'SELECT sr.defect_code, SUM(sr.qty) as total FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE 1=1';
   const tParams: any[] = [];
-  if (pIds.length > 0) { topSql += ` AND product_id IN (${pIds.map(() => '?').join(',')})`; tParams.push(...pIds); }
-  if (startDate) { topSql += ' AND record_date >= ?'; tParams.push(startDate); }
-  if (endDate) { topSql += ' AND record_date <= ?'; tParams.push(endDate); }
-  topSql += ' GROUP BY defect_code ORDER BY total DESC LIMIT ?';
+  if (pIds.length > 0) { topSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; tParams.push(...pIds); }
+  if (startDate) { topSql += ' AND sr.record_date >= ?'; tParams.push(startDate); }
+  if (endDate) { topSql += ' AND sr.record_date <= ?'; tParams.push(endDate); }
+  topSql += ' GROUP BY sr.defect_code ORDER BY total DESC LIMIT ?';
   tParams.push(top);
   const topCodes = (db.prepare(topSql).all(...tParams) as any[]).map(r => r.defect_code);
 
   // Get counts per date per code
-  let detailSql = 'SELECT record_date, defect_code, SUM(qty) as qty FROM station_detail_records WHERE defect_code IN (';
+  let detailSql = 'SELECT sr.record_date, sr.defect_code, SUM(sr.qty) as qty FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE sr.defect_code IN (';
   detailSql += topCodes.map(() => '?').join(',') + ')';
   const dParams: any[] = [...topCodes];
-  if (pIds.length > 0) { detailSql += ` AND product_id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
-  if (startDate) { detailSql += ' AND record_date >= ?'; dParams.push(startDate); }
-  if (endDate) { detailSql += ' AND record_date <= ?'; dParams.push(endDate); }
-  detailSql += ' GROUP BY record_date, defect_code ORDER BY record_date';
+  if (pIds.length > 0) { detailSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
+  if (startDate) { detailSql += ' AND sr.record_date >= ?'; dParams.push(startDate); }
+  if (endDate) { detailSql += ' AND sr.record_date <= ?'; dParams.push(endDate); }
+  detailSql += ' GROUP BY sr.record_date, sr.defect_code ORDER BY sr.record_date';
   const detailRows = db.prepare(detailSql).all(...dParams) as any[];
 
   const dates = [...new Set(detailRows.map((r: any) => r.record_date))].sort();

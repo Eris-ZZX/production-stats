@@ -10,18 +10,22 @@ import dayjs from 'dayjs';
 const { Title } = Typography;
 
 interface InspRecord {
-  id: number; productId: number; productSn: string; minorSection: string; majorSection: string;
+  id: number; productSkuId: number; productSn: string; minorSection: string; majorSection: string;
   productionDefects: string[]; fqcDefects: string[]; inspectionDate: string; createdAt: string;
 }
 
 export default function InspectionEntry() {
-  const { currentProduct } = useProduct();
+  const { currentProduct, skus } = useProduct();
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
 
   // ===== 远端数据 =====
   const [stations, setStations] = useState<Station[]>([]);
   const [defects, setDefects] = useState<DefectCode[]>([]);
+
+  // 品号 数据
+  const activeSkus = useMemo(() => skus.filter(s => s.isActive), [skus]);
+  const lineSkus = useMemo(() => activeSkus.filter(s => !currentProduct || s.productLineId === currentProduct.id), [activeSkus, currentProduct]);
 
   // ===== 状态 =====
   const [records, setRecords] = useState<InspRecord[]>([]);
@@ -81,10 +85,10 @@ export default function InspectionEntry() {
 
   const saveNew = async () => {
     const row = await editForm.validateFields();
-    if (!row.productSn || !row.inspectionDate) { message.warning('请填写产品编号和日期'); return; }
+    if (!row.productSkuId || !row.productSn || !row.inspectionDate) { message.warning('请填写品号、产品编号和日期'); return; }
     try {
       await inspectionRecordsApi.create({
-        productId: currentProduct?.id || 1,
+        productSkuId: row.productSkuId,
         productSn: row.productSn,
         minorSection: row.minorSection || '-',
         majorSection: row.majorSection || '-',
@@ -99,8 +103,6 @@ export default function InspectionEntry() {
       message.error('新增失败: ' + (e.message || '未知错误'));
     }
   };
-
-  const add = () => { setAdding(true); setEditingKey(null); editForm.resetFields(); };
 
   const del = async (id: number) => {
     try {
@@ -119,10 +121,10 @@ export default function InspectionEntry() {
 
   const handleSingleAdd = async () => {
     const values = form.getFieldsValue();
-    if (!values.productSn || !values.inspectionDate) { message.warning('请填写产品编号和日期'); return; }
+    if (!values.productSkuId || !values.productSn || !values.inspectionDate) { message.warning('请填写品号、产品编号和日期'); return; }
     try {
       await inspectionRecordsApi.create({
-        productId: currentProduct?.id || 1,
+        productSkuId: values.productSkuId,
         productSn: values.productSn,
         minorSection: values.minorSection || '-',
         majorSection: values.majorSection || '-',
@@ -138,11 +140,12 @@ export default function InspectionEntry() {
     }
   };
 
-  const newRecord: InspRecord = { id: -1, productId: currentProduct?.id || 1, productSn: '', minorSection: '-', majorSection: '-', productionDefects: [], fqcDefects: [], inspectionDate: '', createdAt: '' };
+  const newRecord: InspRecord = { id: -1, productSkuId: 0, productSn: '', minorSection: '-', majorSection: '-', productionDefects: [], fqcDefects: [], inspectionDate: '', createdAt: '' };
 
   // 筛选逻辑
   const inspFilterFields: FilterField[] = [
     { key: 'inspectionDate', label: '日期', type: 'date' },
+    { key: 'productSkuId', label: '品号', type: 'text', options: lineSkus.map(s => ({ value: s.code, label: s.code })), getValue: (r: InspRecord) => skus.find(s => s.id === r.productSkuId)?.code || '' },
     { key: 'productSn', label: 'SN', type: 'text' },
     { key: 'majorSection', label: '大段', type: 'text', options: ['组装','测试','包装'].map(v => ({ value: v, label: v })) },
     { key: 'minorSection', label: '小段', type: 'text' },
@@ -150,13 +153,16 @@ export default function InspectionEntry() {
 
   const filteredInspRecords = useMemo(() => applySmartFilters(records, inspSearch, inspConditions, inspFilterFields, [
     'productSn', 'inspectionDate', 'majorSection', 'minorSection',
+    r => skus.find(s => s.id === r.productSkuId)?.code || '',
     r => r.productionDefects?.join(',') || '',
     r => r.fqcDefects?.join(',') || '',
-  ]), [records, inspSearch, inspConditions]);
+  ]), [records, inspSearch, inspConditions, skus]);
 
   const getColumns = () => [
     { title: '日期', dataIndex: 'inspectionDate', key: 'date', width: 120,
       render: (_: unknown, r: InspRecord) => isEditing(r.id) ? <Form.Item name="inspectionDate" style={{ margin: 0 }} rules={[{ required: true }]}><DatePicker size="small" style={{ width: 110 }} /></Form.Item> : r.inspectionDate },
+    { title: '品号', dataIndex: 'productSkuId', key: 'sku', width: 100,
+      render: (_: unknown, r: InspRecord) => isEditing(r.id) ? <Form.Item name="productSkuId" style={{ margin: 0 }} rules={[{ required: true }]}><Select size="small" style={{ width: 90 }} showSearch optionFilterProp="label" options={lineSkus.map(s => ({ value: s.id, label: s.code }))} /></Form.Item> : skus.find(s => s.id === r.productSkuId)?.code || '-' },
     { title: 'SN', dataIndex: 'productSn', key: 'sn', width: 170,
       render: (_: unknown, r: InspRecord) => isEditing(r.id) ? <Form.Item name="productSn" style={{ margin: 0 }} rules={[{ required: true }]}><Input size="small" style={{ width: 160 }} /></Form.Item> : r.productSn },
     { title: '大段', dataIndex: 'majorSection', key: 'major', width: 70,
@@ -174,13 +180,17 @@ export default function InspectionEntry() {
 
   return (
     <div>
-      <Title level={4}>{currentProduct?.code} — 多缺陷外检录入</Title>
+      <Title level={4}>{currentProduct?.name} — 多缺陷外检录入</Title>
 
       {/* 单条录入 */}
       <Card style={{ marginBottom: 12 }}>
         <Form form={form} layout="inline" style={{ flexWrap: 'wrap', gap: 8 }}>
           <Form.Item name="inspectionDate" label="日期" rules={[{ required: true }]}>
             <DatePicker style={{ width: 140 }} />
+          </Form.Item>
+          <Form.Item name="productSkuId" label="品号" rules={[{ required: true }]}>
+            <Select style={{ width: 150 }} showSearch optionFilterProp="label" placeholder="选择品号"
+              options={lineSkus.map(s => ({ value: s.id, label: s.code }))} />
           </Form.Item>
           <Form.Item name="productSn" label="产品编号" rules={[{ required: true }]}>
             <Input placeholder="SN-YYYYMMDD-XXX" style={{ width: 200 }} />
@@ -209,7 +219,7 @@ export default function InspectionEntry() {
       <Card title={<span>已录入记录 ({filteredInspRecords.length} 条) <SmartFilterBar fields={inspFilterFields} searchText={inspSearch} onSearchChange={setInspSearch} conditions={inspConditions} onConditionsChange={setInspConditions} /></span>}>
         <Form form={editForm} component={false}>
           <Table
-            dataSource={[...(adding ? [{ ...newRecord, key: -1 }] : []), ...filteredInspRecords.map(r => ({ ...r, key: r.id }))]}
+scroll={{ x: 'max-content' }}             dataSource={[...(adding ? [{ ...newRecord, key: -1 }] : []), ...filteredInspRecords.map(r => ({ ...r, key: r.id }))]}
             columns={getColumns() as any} loading={loading} pagination={{ pageSize: 10 }} size="small" />
         </Form>
       </Card>

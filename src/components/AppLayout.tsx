@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Select, Tag, Typography, Button, Modal, Form, Input, message, Space } from 'antd';
+import { Layout, Menu, Select, Tag, Typography, Button, Modal, Form, Input, message } from 'antd';
 import {
   DashboardOutlined,
   EditOutlined,
@@ -56,7 +56,7 @@ const ALL_MENU_ITEMS = [
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentProduct, products, currentRole, setCurrentProduct, loginProduct, logoutProduct, refresh } = useProduct();
+  const { currentProduct, products, currentRole, loginProduct, logoutProduct, refresh } = useProduct();
   const [collapsed, setCollapsed] = useState(false);
   // Admin login
   const [adminLoginOpen, setAdminLoginOpen] = useState(false);
@@ -111,7 +111,7 @@ export default function AppLayout() {
       const auths = getProductAuths();
       const existing = auths.find((a: any) => a.productId === productId);
       if (existing) {
-        loginProduct(productId, existing.role, existing.productName || p.name);
+        loginProduct(productId, existing.role as ProductRole, existing.productName || p.name);
         return;
       }
       setPendingProductId(productId);

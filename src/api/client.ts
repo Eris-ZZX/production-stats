@@ -61,7 +61,12 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     throw new Error('登录已过期，请重新登录');
   }
 
-  const data = await res.json();
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`服务器错误 (${res.status})，请检查后端是否正常运行`);
+  }
   if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
   return data as T;
 }

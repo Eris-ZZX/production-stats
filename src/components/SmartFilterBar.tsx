@@ -52,7 +52,7 @@ export function applySmartFilters<T extends Record<string, any>>(
     const op = c.op;
 
     r = r.filter(item => {
-      const raw = fd.getValue ? fd.getValue(item) : String(item[fd.key] ?? '');
+      let raw = fd.getValue ? fd.getValue(item) : String(item[fd.key] ?? '');
       if (fd.type === 'number') {
         const num = Number(raw); if (isNaN(num)) return false;
         const v = Number(c.values[0]); if (isNaN(v)) return true;
@@ -69,9 +69,14 @@ export function applySmartFilters<T extends Record<string, any>>(
         if (op === 'between') return (!c.values[0] || d >= c.values[0]) && (!c.values[1] || d <= c.values[1]);
         return true;
       }
-      const low = raw.toLowerCase(); const v = c.values[0]?.toLowerCase() || '';
-      if (op === 'include') return low.includes(v);
-      if (op === 'exclude') return !low.includes(v);
+      const tests = c.values.filter(v => v?.trim());
+      if (tests.length === 0) return true;
+      // With options (Select dropdown): exact match. Without options (text Input): substring match.
+      const matcher = fd.options?.length
+        ? (v: string) => raw.toLowerCase() === v.toLowerCase()
+        : (v: string) => raw.toLowerCase().includes(v.toLowerCase());
+      if (op === 'include') return tests.some(matcher);
+      if (op === 'exclude') return !tests.some(matcher);
       return true;
     });
   }
@@ -121,10 +126,11 @@ function FilterRowContent({ r, fields, onUpdate, onRemove }: FilterRowContentPro
                 value={r.values[0] ? dayjs(r.values[0]) : undefined}
                 onChange={d => onUpdate(r.id, { values: [d ? d.format('YYYY-MM-DD') : ''] })} />
             )
-          ) : fd?.options ? (
-            <Select mode="multiple" allowClear size="small" style={{ width: 170 }} placeholder={fd.label}
+          ) : fd?.options?.length ? (
+            <Select mode="multiple" allowClear showSearch size="small" style={{ width: 170 }} placeholder={fd.label}
+              filterOption={(input, option) => (option?.label as string || '').includes(input)}
               value={r.values} onChange={vals => onUpdate(r.id, { values: vals || [] })}
-              options={fd.options.slice(0, 50)} maxTagCount={1} dropdownMatchSelectWidth={false} />
+              options={fd.options} maxTagCount={1} dropdownMatchSelectWidth={false} />
           ) : (
             <Input allowClear size="small" style={{ width: 120 }} placeholder="输入..."
               value={r.values[0] || ''} onChange={e => onUpdate(r.id, { values: [e.target.value] })} />
