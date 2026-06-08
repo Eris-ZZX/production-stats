@@ -256,8 +256,10 @@ router.get('/top-defects', optionalProduct, (req, res) => {
   const result = rows.map((r: any) => {
     const d = defects.find((x: any) => x.defect_code === r.defect_code);
     // Find which stations have this defect
-    let stSql = 'SELECT DISTINCT sr.station_id FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE sr.defect_code = ?';
+    let stSql = 'SELECT DISTINCT sr.station_id FROM station_detail_records sr JOIN stations s2 ON sr.station_id = s2.id JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE sr.defect_code = ?';
     const stParams: any[] = [r.defect_code];
+    if (section && section !== 'FQC') { stSql += ' AND s2.major_section = ?'; stParams.push(section); }
+    else if (section === 'FQC') { stSql += ' AND s2.station_type = ?'; stParams.push('FQC'); }
     if (pIds.length > 0) { stSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; stParams.push(...pIds); }
     if (startDate) { stSql += ' AND sr.record_date >= ?'; stParams.push(startDate); }
     if (endDate) { stSql += ' AND sr.record_date <= ?'; stParams.push(endDate); }
@@ -408,9 +410,10 @@ router.get('/section-trend', optionalProduct, (req, res) => {
 // ===== 缺陷趋势 =====
 router.get('/defect-trend', optionalProduct, (req, res) => {
   const productId = (req as any).productId;
-  const { skuIds, startDate, endDate, topN } = req.query;
+  const { skuIds, startDate, endDate, topN, bySection } = req.query;
   const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
   const top = parseInt(String(topN)) || 15;
+  const splitSection = bySection === '1' || bySection === 'true';
 
   // Get top defect codes
   let topSql = 'SELECT sr.defect_code, SUM(sr.qty) as total FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE 1=1';
@@ -422,29 +425,56 @@ router.get('/defect-trend', optionalProduct, (req, res) => {
   tParams.push(top);
   const topCodes = (db.prepare(topSql).all(...tParams) as any[]).map(r => r.defect_code);
 
-  // Get counts per date per code
-  let detailSql = 'SELECT sr.record_date, sr.defect_code, SUM(sr.qty) as qty FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE sr.defect_code IN (';
-  detailSql += topCodes.map(() => '?').join(',') + ')';
-  const dParams: any[] = [...topCodes];
-  if (pIds.length > 0) { detailSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
-  if (startDate) { detailSql += ' AND sr.record_date >= ?'; dParams.push(startDate); }
-  if (endDate) { detailSql += ' AND sr.record_date <= ?'; dParams.push(endDate); }
-  detailSql += ' GROUP BY sr.record_date, sr.defect_code ORDER BY sr.record_date';
-  const detailRows = db.prepare(detailSql).all(...dParams) as any[];
-
-  const dates = [...new Set(detailRows.map((r: any) => r.record_date))].sort();
-  const defects = db.prepare('SELECT * FROM defect_codes').all() as any[];
-
-  const result = topCodes.map(code => {
-    const d = defects.find((x: any) => x.defect_code === code);
-    const countData = dates.map(date => {
-      const row = detailRows.find((r: any) => r.record_date === date && r.defect_code === code);
-      return row ? row.qty : 0;
+  if (splitSection) {
+    // BY section: GROUP BY record_date, defect_code, major_section
+    let detailSql = 'SELECT sr.record_date, sr.defect_code, s.major_section, SUM(sr.qty) as qty FROM station_detail_records sr JOIN stations s ON sr.station_id = s.id JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE sr.defect_code IN (';
+    detailSql += topCodes.map(() => '?').join(',') + ')';
+    const dParams: any[] = [...topCodes];
+    if (pIds.length > 0) { detailSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
+    if (startDate) { detailSql += ' AND sr.record_date >= ?'; dParams.push(startDate); }
+    if (endDate) { detailSql += ' AND sr.record_date <= ?'; dParams.push(endDate); }
+    detailSql += ' GROUP BY sr.record_date, sr.defect_code, s.major_section ORDER BY sr.record_date';
+    const detailRows = db.prepare(detailSql).all(...dParams) as any[];
+    const dates = [...new Set(detailRows.map((r: any) => r.record_date))].sort();
+    const defects = db.prepare('SELECT * FROM defect_codes').all() as any[];
+    // Build result: one line per (defect_code, major_section) combo
+    const keySet = new Set<string>();
+    const result: any[] = [];
+    detailRows.forEach(r => {
+      const key = `${r.defect_code}|${r.major_section}`;
+      if (!keySet.has(key)) { keySet.add(key); result.push({ defectCode: r.defect_code, section: r.major_section }); }
     });
-    return { defectName: d?.defect || code, component: d?.component || '', count: countData };
-  });
-
-  res.json({ dates, defects: result });
+    result.forEach(item => {
+      const d = defects.find((x: any) => x.defect_code === item.defectCode);
+      item.defectName = d?.defect || item.defectCode;
+      item.component = d?.component || '';
+      item.type = d?.type || '';
+      item.location = d?.location || '';
+      item.count = dates.map(date => { const row = detailRows.find((r: any) => r.record_date === date && r.defect_code === item.defectCode && r.major_section === item.section); return row ? row.qty : 0; });
+    });
+    res.json({ dates, defects: result });
+  } else {
+    // Sum across all sections
+    let detailSql = 'SELECT sr.record_date, sr.defect_code, SUM(sr.qty) as qty FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE sr.defect_code IN (';
+    detailSql += topCodes.map(() => '?').join(',') + ')';
+    const dParams: any[] = [...topCodes];
+    if (pIds.length > 0) { detailSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; dParams.push(...pIds); }
+    if (startDate) { detailSql += ' AND sr.record_date >= ?'; dParams.push(startDate); }
+    if (endDate) { detailSql += ' AND sr.record_date <= ?'; dParams.push(endDate); }
+    detailSql += ' GROUP BY sr.record_date, sr.defect_code ORDER BY sr.record_date';
+    const detailRows = db.prepare(detailSql).all(...dParams) as any[];
+    const dates = [...new Set(detailRows.map((r: any) => r.record_date))].sort();
+    const defects = db.prepare('SELECT * FROM defect_codes').all() as any[];
+    const result = topCodes.map(code => {
+      const d = defects.find((x: any) => x.defect_code === code);
+      const countData = dates.map(date => {
+        const row = detailRows.find((r: any) => r.record_date === date && r.defect_code === code);
+        return row ? row.qty : 0;
+      });
+      return { defectCode: code, defectName: d?.defect || code, component: d?.component || '', type: d?.type || '', location: d?.location || '', count: countData };
+    });
+    res.json({ dates, defects: result });
+  }
 });
 
 export default router;

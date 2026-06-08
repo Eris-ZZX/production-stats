@@ -104,12 +104,12 @@ export default function SectionTrend() {
     [rawData, granularity]);
 
   const filteredSections = useMemo(() => {
-    if (selectedSections.length === 0) return data.sections;
+    if (selectedSections.length === 0) return [];
     return data.sections.filter(s => selectedSections.includes(s.sectionName));
   }, [data.sections, selectedSections]);
 
   const chartOption = useMemo(() => {
-    if (data.dates.length === 0 || filteredSections.length === 0) return {};
+    if (filteredSections.length === 0) return {};
     return {
       tooltip: {
         trigger: 'axis',
@@ -124,13 +124,13 @@ export default function SectionTrend() {
       },
       legend: { bottom: 0, data: filteredSections.map(s => s.sectionName) },
       grid: { left: 60, right: 30, top: 20, bottom: 50 },
-      xAxis: { type: 'category', data: data.dates, boundaryGap: false },
+      xAxis: { type: 'category', data: rawData.dates, boundaryGap: false },
       yAxis: { type: 'value', name: 'FPY(%)', min: (val: { min: number }) => Math.floor(Math.min(val.min, 90) / 5) * 5, max: 100 },
       series: filteredSections.map((s, idx) => ({
         name: s.sectionName,
         type: 'line',
         data: s.data,
-        smooth: true,
+        smooth: false,
         connectNulls: false,
         symbolSize: 8,
         lineStyle: { width: 3 },

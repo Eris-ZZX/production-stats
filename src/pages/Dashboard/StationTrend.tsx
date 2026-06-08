@@ -103,12 +103,12 @@ export default function StationTrend() {
     [rawData, granularity]);
 
   const filteredStations = useMemo(() => {
-    if (selectedStationIds.length === 0) return data.stations;
+    if (selectedStationIds.length === 0) return [];
     return data.stations.filter(s => selectedStationIds.includes(s.stationId));
   }, [data.stations, selectedStationIds]);
 
   const chartOption = useMemo(() => {
-    if (data.dates.length === 0) return {};
+    if (filteredStations.length === 0) return {};
     return {
       tooltip: {
         trigger: 'axis',
@@ -123,13 +123,13 @@ export default function StationTrend() {
       },
       legend: { type: 'scroll', bottom: 0, data: filteredStations.map(s => s.stationName) },
       grid: { left: 60, right: 30, top: 20, bottom: 50 },
-      xAxis: { type: 'category', data: data.dates, boundaryGap: false },
+      xAxis: { type: 'category', data: rawData.dates, boundaryGap: false },
       yAxis: { type: 'value', name: 'FPY(%)', min: (val: { min: number }) => Math.floor(Math.min(val.min, 90) / 5) * 5, max: 100 },
       series: filteredStations.map((s, i) => ({
         name: s.stationName,
         type: 'line',
         data: s.data,
-        smooth: true,
+        smooth: false,
         connectNulls: false,
         symbolSize: 6,
         lineStyle: { width: 2 },
@@ -138,6 +138,11 @@ export default function StationTrend() {
       })),
     };
   }, [data, filteredStations]);
+
+  // 工站下拉选项始终从原始数据提取（不受选择影响）
+  const stationOptions = useMemo(() =>
+    data.stations.map(s => ({ value: s.stationId, label: `${s.majorSection}-${s.stationName}` })),
+    [data.stations]);
 
   return (
     <div>
@@ -164,7 +169,7 @@ export default function StationTrend() {
           <span>工站:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={selectedStationIds}
             onChange={setSelectedStationIds} placeholder="全选" maxTagCount={3}
-            options={data.stations.map(s => ({ value: s.stationId, label: `${s.majorSection}-${s.stationName}` }))} />
+            options={stationOptions} />
         </Space>
       </Card>
       <Card>
