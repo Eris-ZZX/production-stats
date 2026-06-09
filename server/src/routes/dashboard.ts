@@ -1,14 +1,24 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { optionalProduct } from '../auth.js';
+import { requireProduct } from '../auth.js';
 
 const router = Router();
 
+// helper: resolve SKU IDs from productId when skuIds not provided
+function resolveSkuIds(skuIds: any, productId: number): number[] {
+  if (skuIds) return String(skuIds).split(',').map(Number);
+  if (productId) {
+    const rows = db.prepare('SELECT id FROM product_skus WHERE product_line_id = ?').all(productId) as { id: number }[];
+    return rows.map(r => r.id);
+  }
+  return [];
+}
+
 // ===== 工站 FPY =====
-router.get('/station-fpy', optionalProduct, (req, res) => {
+router.get('/station-fpy', requireProduct, (req, res) => {
   const productId = (req as any).productId;
   const { skuIds, startDate, endDate } = req.query;
-  const sIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [] : []);
+  const sIds = resolveSkuIds(skuIds, productId);
 
   let prodSql = 'SELECT pr.station_id, SUM(pr.output_qty) as total_output FROM production_records pr JOIN product_skus ps ON pr.product_sku_id = ps.id WHERE 1=1';
   let detailSql = 'SELECT sr.station_id, sr.defect_type, SUM(sr.qty) as qty FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE 1=1';
@@ -66,10 +76,10 @@ router.get('/station-fpy', optionalProduct, (req, res) => {
 });
 
 // ===== 工段 FPY =====
-router.get('/section-fpy', optionalProduct, (req, res) => {
+router.get('/section-fpy', requireProduct, (req, res) => {
   const productId = (req as any).productId;
   const { skuIds, startDate, endDate } = req.query;
-  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
+  const pIds = resolveSkuIds(skuIds, productId);
 
   // Get station FPY first (excluding FQC)
   let prodSql = 'SELECT s.id, s.major_section, SUM(pr.output_qty) as total_output FROM production_records pr JOIN stations s ON pr.station_id = s.id JOIN product_skus ps ON pr.product_sku_id = ps.id WHERE s.station_type != ?';
@@ -142,10 +152,10 @@ router.get('/section-fpy', optionalProduct, (req, res) => {
 });
 
 // ===== FQC FPY =====
-router.get('/fqc-fpy', optionalProduct, (req, res) => {
+router.get('/fqc-fpy', requireProduct, (req, res) => {
   const productId = (req as any).productId;
   const { skuIds, startDate, endDate } = req.query;
-  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
+  const pIds = resolveSkuIds(skuIds, productId);
 
   let prodSql = 'SELECT s.id, s.major_section, SUM(pr.output_qty) as total_output FROM production_records pr JOIN stations s ON pr.station_id = s.id JOIN product_skus ps ON pr.product_sku_id = ps.id WHERE s.station_type = ?';
   const params: any[] = ['FQC'];
@@ -201,10 +211,10 @@ router.get('/fqc-fpy', optionalProduct, (req, res) => {
 });
 
 // ===== TOP 缺陷排名 =====
-router.get('/top-defects', optionalProduct, (req, res) => {
+router.get('/top-defects', requireProduct, (req, res) => {
   const productId = (req as any).productId;
   const { skuIds, startDate, endDate, section, defectType, topN } = req.query;
-  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
+  const pIds = resolveSkuIds(skuIds, productId);
   const top = parseInt(String(topN)) || 10;
 
   let filterSql = '';
@@ -297,10 +307,10 @@ router.get('/top-defects', optionalProduct, (req, res) => {
 });
 
 // ===== 工站趋势 =====
-router.get('/station-trend', optionalProduct, (req, res) => {
+router.get('/station-trend', requireProduct, (req, res) => {
   const productId = (req as any).productId;
   const { skuIds, startDate, endDate, defectType } = req.query;
-  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
+  const pIds = resolveSkuIds(skuIds, productId);
 
   // Get stations
   const stations = db.prepare("SELECT * FROM stations WHERE is_active = 1 AND station_type != 'FQC' ORDER BY sort_order").all() as any[];
@@ -346,11 +356,11 @@ router.get('/station-trend', optionalProduct, (req, res) => {
 });
 
 // ===== 工段趋势 =====
-router.get('/section-trend', optionalProduct, (req, res) => {
+router.get('/section-trend', requireProduct, (req, res) => {
   // Reuse station trend and aggregate by section
   const productId = (req as any).productId;
   const { skuIds, startDate, endDate, defectType } = req.query;
-  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
+  const pIds = resolveSkuIds(skuIds, productId);
 
   const stations = db.prepare("SELECT * FROM stations WHERE is_active = 1 AND station_type != 'FQC' ORDER BY sort_order").all() as any[];
 
@@ -408,10 +418,10 @@ router.get('/section-trend', optionalProduct, (req, res) => {
 });
 
 // ===== 缺陷趋势 =====
-router.get('/defect-trend', optionalProduct, (req, res) => {
+router.get('/defect-trend', requireProduct, (req, res) => {
   const productId = (req as any).productId;
   const { skuIds, startDate, endDate, topN, bySection } = req.query;
-  const pIds = skuIds ? String(skuIds).split(',').map(Number) : (productId ? [productId] : []);
+  const pIds = resolveSkuIds(skuIds, productId);
   const top = parseInt(String(topN)) || 15;
   const splitSection = bySection === '1' || bySection === 'true';
 

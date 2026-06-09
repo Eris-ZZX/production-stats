@@ -4,6 +4,11 @@ import { requireProduct } from '../auth.js';
 
 const router = Router();
 
+function validateSkuOwnership(productSkuId: number, productId: number): boolean {
+  const row = db.prepare('SELECT product_line_id FROM product_skus WHERE id = ?').get(productSkuId) as any;
+  return row?.product_line_id === productId;
+}
+
 router.get('/', requireProduct, (req, res) => {
   const productId = (req as any).productId;
   const { startDate, endDate } = req.query;
@@ -23,8 +28,10 @@ router.get('/', requireProduct, (req, res) => {
 });
 
 router.post('/', requireProduct, (req, res) => {
+  const productId = (req as any).productId;
   const r = req.body;
   if (!r.productSkuId) { res.status(400).json({ error: '品号必填' }); return; }
+  if (!validateSkuOwnership(r.productSkuId, productId)) { res.status(403).json({ error: '品号不属于当前产品' }); return; }
   const result = db.prepare(
     'INSERT INTO inspection_records (product_sku_id, product_sn, major_section, minor_section, production_defects, fqc_defects, inspection_date) VALUES (?,?,?,?,?,?,?)'
   ).run(r.productSkuId, r.productSn, r.majorSection || '', r.minorSection || '', JSON.stringify(r.productionDefects || []), JSON.stringify(r.fqcDefects || []), r.inspectionDate);

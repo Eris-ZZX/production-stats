@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { requireAdmin } from '../auth.js';
+import { hashPassword } from '../crypto.js';
 
 const router = Router();
 
@@ -16,7 +17,7 @@ router.post('/', requireAdmin, (req, res) => {
   if ((req as any).adminRole !== 'super') { res.status(403).json({ error: '权限不足' }); return; }
   const { username, password, role } = req.body;
   try {
-    const result = db.prepare('INSERT INTO admin_accounts (username, password, role) VALUES (?,?,?)').run(username, password, role);
+    const result = db.prepare('INSERT INTO admin_accounts (username, password, role) VALUES (?,?,?)').run(username, hashPassword(password), role);
     res.json({ id: result.lastInsertRowid });
   } catch (e: any) {
     if (e.message?.includes('UNIQUE')) res.status(409).json({ error: '账号已存在' });
@@ -28,7 +29,7 @@ router.put('/:id', requireAdmin, (req, res) => {
   if ((req as any).adminRole !== 'super') { res.status(403).json({ error: '权限不足' }); return; }
   const { username, password, role, isActive } = req.body;
   if (password) {
-    db.prepare('UPDATE admin_accounts SET username=?, password=?, role=?, is_active=? WHERE id=?').run(username, password, role, isActive ? 1 : 0, req.params.id);
+    db.prepare('UPDATE admin_accounts SET username=?, password=?, role=?, is_active=? WHERE id=?').run(username, hashPassword(password), role, isActive ? 1 : 0, req.params.id);
   } else {
     db.prepare('UPDATE admin_accounts SET username=?, role=?, is_active=? WHERE id=?').run(username, role, isActive ? 1 : 0, req.params.id);
   }

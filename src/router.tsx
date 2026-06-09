@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
+import LoginPage from './pages/LoginPage';
 import AppLayout from './components/AppLayout';
 import StationFpyList from './pages/Dashboard/StationFpyList';
 import SectionFpyList from './pages/Dashboard/SectionFpyList';
@@ -19,11 +20,12 @@ import AdminAccountManager from './pages/DataConfig/AdminAccountManager';
 import AdminLayout from './components/AdminLayout';
 
 export const router = createBrowserRouter([
+  { path: '/', element: <LoginPage /> },
   {
-    path: '/',
+    path: '/app',
     element: <AppLayout />,
     children: [
-      { index: true, element: <Navigate to="/dashboard/station-fpy" replace /> },
+      { index: true, element: <Navigate to="/app/dashboard/station-fpy" replace /> },
       { path: 'dashboard/station-fpy', element: <StationFpyList /> },
       { path: 'dashboard/section-fpy', element: <SectionFpyList /> },
       { path: 'dashboard/top', element: <TopDefectBoard /> },

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { hashPassword } from './crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, '..', 'data', 'app.db');
@@ -155,13 +156,19 @@ export function initDB() {
 }
 
 function seedData() {
+  // Migrate existing plaintext passwords to hashed
+  const existing = db.prepare(`SELECT id, password FROM admin_accounts WHERE length(password) < 60`).all() as { id: number; password: string }[];
+  for (const row of existing) {
+    db.prepare('UPDATE admin_accounts SET password = ? WHERE id = ?').run(hashPassword(row.password), row.id);
+  }
+
   const count = db.prepare('SELECT COUNT(*) as c FROM admin_accounts').get() as { c: number };
   if (count.c > 0) return;
 
   const insert = db.prepare('INSERT OR IGNORE INTO admin_accounts (username, password, role) VALUES (?, ?, ?)');
-  insert.run('admin', 'admin', 'super');
-  insert.run('config', 'config', 'config');
-  insert.run('viewer', 'viewer', 'viewer');
+  insert.run('admin', hashPassword('admin'), 'super');
+  insert.run('config', hashPassword('config'), 'config');
+  insert.run('viewer', hashPassword('viewer'), 'viewer');
 
   const insStField = db.prepare('INSERT OR IGNORE INTO station_field_options (field_type, name, is_data_entry) VALUES (?, ?, ?)');
   insStField.run('stationType', '必过工站', 1);

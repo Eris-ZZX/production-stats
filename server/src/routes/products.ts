@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { requireAdmin, requireAnyAuth, verifyToken } from '../auth.js';
+import { hashPassword } from '../crypto.js';
 
 const router = Router();
 
@@ -14,7 +15,7 @@ router.get('/', (req, res) => {
     const rows = db.prepare('SELECT * FROM product_lines').all();
     res.json((rows as any[]).map(r => ({
       id: r.id, name: r.name, isActive: !!r.is_active,
-      pwdRead: r.pwd_read || '', pwdEntry: r.pwd_entry || '', pwdConfig: r.pwd_config || '',
+      pwdRead: r.pwd_read ? '••••••' : '', pwdEntry: r.pwd_entry ? '••••••' : '', pwdConfig: r.pwd_config ? '••••••' : '',
     })));
   } else {
     const rows = db.prepare('SELECT id, name, is_active as isActive FROM product_lines WHERE is_active = 1').all();
@@ -33,7 +34,7 @@ router.post('/', requireAdmin, (req, res) => {
   if ((req as any).adminRole !== 'super') { res.status(403).json({ error: '权限不足' }); return; }
   const { name, pwdRead, pwdEntry, pwdConfig } = req.body;
   if (!name) { res.status(400).json({ error: '产品名称必填' }); return; }
-  const result = db.prepare('INSERT INTO product_lines (name, pwd_read, pwd_entry, pwd_config) VALUES (?,?,?,?)').run(name, pwdRead || '', pwdEntry || '', pwdConfig || '');
+  const result = db.prepare('INSERT INTO product_lines (name, pwd_read, pwd_entry, pwd_config) VALUES (?,?,?,?)').run(name, pwdRead ? hashPassword(pwdRead) : '', pwdEntry ? hashPassword(pwdEntry) : '', pwdConfig ? hashPassword(pwdConfig) : '');
   const newId = result.lastInsertRowid;
 
   // 复制主模板字段选项到产品专用表
@@ -46,7 +47,7 @@ router.post('/', requireAdmin, (req, res) => {
 router.put('/:id', requireAdmin, (req, res) => {
   if ((req as any).adminRole !== 'super') { res.status(403).json({ error: '权限不足' }); return; }
   const { name, isActive, pwdRead, pwdEntry, pwdConfig } = req.body;
-  db.prepare('UPDATE product_lines SET name=?, is_active=?, pwd_read=?, pwd_entry=?, pwd_config=? WHERE id=?').run(name, isActive ? 1 : 0, pwdRead || '', pwdEntry || '', pwdConfig || '', req.params.id);
+  db.prepare('UPDATE product_lines SET name=?, is_active=?, pwd_read=?, pwd_entry=?, pwd_config=? WHERE id=?').run(name, isActive ? 1 : 0, pwdRead ? hashPassword(pwdRead) : '', pwdEntry ? hashPassword(pwdEntry) : '', pwdConfig ? hashPassword(pwdConfig) : '', req.params.id);
   res.json({ ok: true });
 });
 
