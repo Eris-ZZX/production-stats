@@ -111,13 +111,13 @@ router.delete('/skus/:id', requireConfigAuth, (req, res) => {
   if (pid && sku.product_line_id !== pid) { res.status(403).json({ error: '无权操作其他产品的品号' }); return; }
   // Check if SKU has any records — deactivate instead of delete
   const used = db.prepare(`
-    SELECT 1 FROM production_records WHERE product_sku_id = ? LIMIT 1
-    UNION ALL SELECT 1 FROM station_detail_records WHERE product_sku_id = ? LIMIT 1
-    UNION ALL SELECT 1 FROM inspection_records WHERE product_sku_id = ? LIMIT 1`
+    SELECT 1 FROM production_records WHERE product_sku_id = ?
+    UNION ALL SELECT 1 FROM station_detail_records WHERE product_sku_id = ?
+    UNION ALL SELECT 1 FROM inspection_records WHERE product_sku_id = ?
+    LIMIT 1`
   ).get(sku.id, sku.id, sku.id);
   if (used) {
-    db.prepare('UPDATE product_skus SET is_active = 0 WHERE id = ?').run(sku.id);
-    res.json({ ok: true, deactivated: true, message: '该品号已有生产记录，已自动停用' });
+    res.json({ inUse: true, message: '该品号已有生产记录，无法删除' });
     return;
   }
   db.prepare('DELETE FROM product_skus WHERE id = ?').run(sku.id);

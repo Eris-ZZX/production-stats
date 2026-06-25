@@ -42,7 +42,7 @@ router.put('/:id', requireConfigAuth, (req, res) => {
   const whereParams: any[] = ctx.type === 'product' ? [req.params.id, pid] : [req.params.id];
   const existing = db.prepare(`SELECT * FROM ${ctx.table} WHERE ${whereClause}`).get(...whereParams) as any;
   if (!existing) { res.status(404).json({ error: '不存在' }); return; }
-  db.prepare(`UPDATE ${ctx.table} SET field_type=?, name=? WHERE id=?`).run(r.fieldType, r.name, req.params.id);
+  db.prepare(`UPDATE ${ctx.table} SET field_type=?, name=? WHERE id=?`).run(r.fieldType || existing.field_type, r.name || existing.name, req.params.id);
   res.json({ ok: true });
 });
 

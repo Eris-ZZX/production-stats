@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Form, Input, Switch, Typography, Tag, message, Popconfirm, Space } from 'antd';
+import { Card, Table, Button, Form, Input, Switch, Typography, Tag, message, Popconfirm, Space, Modal } from 'antd';
 import { PlusOutlined, CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useProduct } from '../../store/ProductContext';
 import { productLinesApi } from '../../api';
@@ -55,12 +55,22 @@ export default function ProductList() {
   const del = async (id: number) => {
     try {
       const result: any = await productLinesApi.removeSku(id);
-      if (result?.deactivated) {
-        message.warning(result.message || '该品号已有记录，已自动停用');
+      if (result?.inUse) {
+        Modal.confirm({
+          title: '该品号已有生产记录，无法删除',
+          content: '是否改为停用？（停用后不再出现在录入选项中，历史数据不受影响）',
+          okText: '停用',
+          cancelText: '取消',
+          onOk: async () => {
+            await productLinesApi.updateSku(id, { isActive: false });
+            message.success('已停用');
+            loadData(); refresh();
+          },
+        });
       } else {
         message.success('已删除');
+        loadData(); refresh();
       }
-      loadData(); refresh();
     } catch (e: any) { message.error(e?.message || '删除失败'); }
   };
 

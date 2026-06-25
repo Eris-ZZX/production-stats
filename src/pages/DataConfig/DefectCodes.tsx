@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Card, Table, Button, Form, Select, Switch, Tag, Typography, message, Upload, Popconfirm, Space } from 'antd';
+import { Card, Table, Button, Form, Select, Switch, Tag, Typography, message, Upload, Popconfirm, Space, Modal } from 'antd';
 import { PlusOutlined, CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, FileExcelOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as XLSX from 'xlsx';
@@ -79,12 +79,22 @@ export default function DefectCodes() {
   const del = async (id: number) => {
     try {
       const result: any = await defectCodesApi.remove(id);
-      if (result?.deactivated) {
-        message.warning(result.message || '该缺陷代码已被使用，已自动停用');
+      if (result?.inUse) {
+        Modal.confirm({
+          title: '该缺陷代码已被使用，无法删除',
+          content: '是否改为停用？（停用后不再出现在录入选项中，历史数据不受影响）',
+          okText: '停用',
+          cancelText: '取消',
+          onOk: async () => {
+            await defectCodesApi.update(id, { isActive: false });
+            message.success('已停用');
+            loadDefects();
+          },
+        });
       } else {
         message.success('已删除');
+        loadDefects();
       }
-      loadDefects();
     } catch (e: any) {
       message.error(e?.message || '删除失败');
     }

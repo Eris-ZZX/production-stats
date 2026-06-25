@@ -45,6 +45,15 @@ router.put('/:id', requireAnyAuth, (req, res) => {
 });
 
 router.delete('/:id', requireAnyAuth, (req, res) => {
+  const used = db.prepare(`
+    SELECT 1 FROM production_records WHERE station_id = ?
+    UNION ALL SELECT 1 FROM station_detail_records WHERE station_id = ?
+    LIMIT 1`
+  ).get(req.params.id, req.params.id);
+  if (used) {
+    res.json({ inUse: true, message: '该工站已有生产记录，无法删除' });
+    return;
+  }
   db.prepare('DELETE FROM stations WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });

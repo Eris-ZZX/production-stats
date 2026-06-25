@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Card, Table, Button, Form, Input, Switch, InputNumber, Select, Tag, Typography, message, Upload, Popconfirm, Space } from 'antd';
+import { Card, Table, Button, Form, Input, Switch, InputNumber, Select, Tag, Typography, message, Upload, Popconfirm, Space, Modal } from 'antd';
 import { PlusOutlined, CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, FileExcelOutlined, MenuOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as XLSX from 'xlsx';
@@ -28,14 +28,14 @@ function SortableRow({ s, index }: { s: Station; index: number }) {
       <td style={{ width: 40, cursor: 'grab', textAlign: 'center' }} {...listeners}>
         <MenuOutlined style={{ color: '#999' }} />
       </td>
-      <td style={{ width: 40, color: '#999', fontSize: 12 }}>{index + 1}</td>
-      <td style={{ width: 80 }}><Tag color="blue">{s.majorSection}</Tag></td>
-      <td style={{ width: 90 }}><Tag color="green">{s.minorSection}</Tag></td>
-      <td style={{ width: 100 }}>{s.stationName}</td>
-      <td style={{ width: 70 }}>{s.stationType ? <Tag>{s.stationType}</Tag> : '-'}</td>
-      <td style={{ width: 100 }}>{s.mesName || '-'}</td>
-      <td style={{ width: 120 }}>{s.abnormalPositions?.length ? s.abnormalPositions.map(p => <Tag key={p} color="red">{p}</Tag>) : '-'}</td>
-      <td style={{ width: 70 }}><Tag color="green">启用</Tag></td>
+      <td style={{ width: 35, color: '#999', fontSize: 12 }}>{index + 1}</td>
+      <td style={{ width: 70 }}><Tag color="blue">{s.majorSection}</Tag></td>
+      <td style={{ width: 60 }}><Tag color="green">{s.minorSection}</Tag></td>
+      <td style={{ width: 80 }}>{s.stationName}</td>
+      <td style={{ width: 60 }}>{s.stationType ? <Tag>{s.stationType}</Tag> : '-'}</td>
+      <td style={{ width: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.mesName}>{s.mesName || '-'}</td>
+      <td style={{ width: 100 }}>{s.abnormalPositions?.length ? s.abnormalPositions.map(p => <Tag key={p} color="red">{p}</Tag>) : '-'}</td>
+      <td style={{ width: 50 }}><Tag color="green">启用</Tag></td>
     </tr>
   );
 }
@@ -112,9 +112,23 @@ export default function StationTree() {
 
   const del = async (id: number) => {
     try {
-      await stationsApi.remove(id);
-      message.success('已删除');
-      loadStations();
+      const result: any = await stationsApi.remove(id);
+      if (result?.inUse) {
+        Modal.confirm({
+          title: '该工站已被使用，无法删除',
+          content: '是否改为停用？（停用后不再出现在录入选项中，历史数据不受影响）',
+          okText: '停用',
+          cancelText: '取消',
+          onOk: async () => {
+            await stationsApi.update(id, { isActive: false });
+            message.success('已停用');
+            loadStations();
+          },
+        });
+      } else {
+        message.success('已删除');
+        loadStations();
+      }
     } catch (e: any) {
       message.error(e?.message || '删除失败');
     }
@@ -242,20 +256,20 @@ export default function StationTree() {
   };
 
   const makeInput = (name: string, opts?: string[]) => opts
-    ? <Form.Item name={name} style={{ margin: 0 }} rules={[{ required: true }]}><Select size="small" style={{ width: 100 }} options={opts.map(v => ({ value: v, label: v }))} mode="tags" maxCount={1} /></Form.Item>
-    : <Form.Item name={name} style={{ margin: 0 }} rules={[{ required: true }]}><Input size="small" style={{ width: 110 }} /></Form.Item>;
+    ? <Form.Item name={name} style={{ margin: 0 }} rules={[{ required: true }]}><Select size="small" style={{ width: 90 }} options={opts.map(v => ({ value: v, label: v }))} mode="tags" maxCount={1} /></Form.Item>
+    : <Form.Item name={name} style={{ margin: 0 }} rules={[{ required: true }]}><Input size="small" style={{ width: 90 }} /></Form.Item>;
 
   const columnsArr: ColumnsType<Station> = [
-    { title: '#', dataIndex: 'sortOrder', key: 'so', width: 50, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="sortOrder" style={{ margin: 0 }}><InputNumber size="small" min={0} style={{ width: 60 }} /></Form.Item> : (r.isActive ? r.sortOrder : <span style={{ color: '#999' }}>/</span>) },
-    { title: '大工段', dataIndex: 'majorSection', key: 'ms', width: 90, render: (_: unknown, r: Station) => isEditing(r.id) ? makeInput('majorSection', majorOptions) : <Tag color="blue">{r.majorSection}</Tag> },
-    { title: '小工段', dataIndex: 'minorSection', key: 'ns', width: 90, render: (_: unknown, r: Station) => isEditing(r.id) ? makeInput('minorSection', minorOptions) : <Tag color="green">{r.minorSection}</Tag> },
-    { title: '工站名称', dataIndex: 'stationName', key: 'sn', width: 100, render: (_: unknown, r: Station) => isEditing(r.id) ? makeInput('stationName') : r.stationName },
-    { title: '类型', dataIndex: 'stationType', key: 'st', width: 100, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="stationType" style={{ margin: 0 }}><Select size="small" style={{ width: 130 }} options={typeOptions.map(v => ({ value: v, label: v }))} /></Form.Item> : r.stationType ? <Tag>{r.stationType}</Tag> : '-' },
-    { title: 'MES', dataIndex: 'mesName', key: 'mn', width: 100, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="mesName" style={{ margin: 0 }}><Input size="small" style={{ width: 100 }} /></Form.Item> : r.mesName || '-' },
-    { title: '异常位置', dataIndex: 'abnormalPositions', key: 'ap', width: 120, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="abnormalPositions" style={{ margin: 0 }}><Select size="small" mode="multiple" allowClear style={{ width: 140 }} options={locationOptions.map(v => ({ value: v, label: v }))} /></Form.Item> : (r.abnormalPositions?.length ? r.abnormalPositions.map(p => <Tag key={p} color="red">{p}</Tag>) : '-') },
-    { title: '录入', dataIndex: 'isDataEntryType', key: 'de', width: 60, render: (_: unknown, r: Station) => <Tag color={r.isDataEntryType ? 'green' : 'default'}>{r.isDataEntryType ? '是' : '否'}</Tag> },
-    { title: '状态', dataIndex: 'isActive', key: 'ia', width: 70, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="isActive" style={{ margin: 0 }} valuePropName="checked"><Switch size="small" checkedChildren="启用" unCheckedChildren="停用" /></Form.Item> : <Tag color={r.isActive ? 'green' : 'default'}>{r.isActive ? '启用' : '停用'}</Tag> },
-    { title: '操作', key: 'ac', width: 140, render: (_: unknown, r: Station) => isEditing(r.id) ? <Space size={4}><Button type="link" size="small" icon={<CheckOutlined />} onClick={() => r.id === -1 ? saveNew() : saveEdit(r.id)}>保存</Button><Button type="link" size="small" icon={<CloseOutlined />} onClick={cancel}>取消</Button></Space> : <Space size={4}><Button type="link" size="small" icon={<EditOutlined />} onClick={() => edit(r)}>编辑</Button><Popconfirm title="确定删除?" onConfirm={() => del(r.id)}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
+    { title: '#', dataIndex: 'sortOrder', key: 'so', width: 45, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="sortOrder" style={{ margin: 0 }}><InputNumber size="small" min={0} style={{ width: 50 }} /></Form.Item> : (r.isActive ? r.sortOrder : <span style={{ color: '#999' }}>/</span>) },
+    { title: '大工段', dataIndex: 'majorSection', key: 'ms', width: 70, render: (_: unknown, r: Station) => isEditing(r.id) ? makeInput('majorSection', majorOptions) : <Tag color="blue">{r.majorSection}</Tag> },
+    { title: '小工段', dataIndex: 'minorSection', key: 'ns', width: 60, render: (_: unknown, r: Station) => isEditing(r.id) ? makeInput('minorSection', minorOptions) : <Tag color="green">{r.minorSection}</Tag> },
+    { title: '工站名称', dataIndex: 'stationName', key: 'sn', width: 80, render: (_: unknown, r: Station) => isEditing(r.id) ? makeInput('stationName') : r.stationName },
+    { title: '类型', dataIndex: 'stationType', key: 'st', width: 80, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="stationType" style={{ margin: 0 }}><Select size="small" style={{ width: 100 }} options={typeOptions.map(v => ({ value: v, label: v }))} /></Form.Item> : r.stationType ? <Tag>{r.stationType}</Tag> : '-' },
+    { title: 'MES', dataIndex: 'mesName', key: 'mn', width: 90, ellipsis: true, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="mesName" style={{ margin: 0 }}><Input size="small" style={{ width: 90 }} /></Form.Item> : r.mesName || '-' },
+    { title: '异常位置', dataIndex: 'abnormalPositions', key: 'ap', width: 100, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="abnormalPositions" style={{ margin: 0 }}><Select size="small" mode="multiple" allowClear style={{ width: 120 }} options={locationOptions.map(v => ({ value: v, label: v }))} /></Form.Item> : (r.abnormalPositions?.length ? r.abnormalPositions.map(p => <Tag key={p} color="red">{p}</Tag>) : '-') },
+    { title: '录入', dataIndex: 'isDataEntryType', key: 'de', width: 50, render: (_: unknown, r: Station) => <Tag color={r.isDataEntryType ? 'green' : 'default'}>{r.isDataEntryType ? '是' : '否'}</Tag> },
+    { title: '状态', dataIndex: 'isActive', key: 'ia', width: 55, render: (_: unknown, r: Station) => isEditing(r.id) ? <Form.Item name="isActive" style={{ margin: 0 }} valuePropName="checked"><Switch size="small" /></Form.Item> : <Tag color={r.isActive ? 'green' : 'default'}>{r.isActive ? '启用' : '停用'}</Tag> },
+    { title: '操作', key: 'ac', width: 120, render: (_: unknown, r: Station) => isEditing(r.id) ? <Space size={4}><Button type="link" size="small" icon={<CheckOutlined />} onClick={() => r.id === -1 ? saveNew() : saveEdit(r.id)}>保存</Button><Button type="link" size="small" icon={<CloseOutlined />} onClick={cancel}>取消</Button></Space> : <Space size={4}><Button type="link" size="small" icon={<EditOutlined />} onClick={() => edit(r)}>编辑</Button><Popconfirm title="确定删除?" onConfirm={() => del(r.id)}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
 
   const newStation: Station = { id: -1, majorSection: '', minorSection: '', stationName: '', stationType: '', isDataEntryType: true, sortOrder: 1, isActive: true };
@@ -304,14 +318,14 @@ export default function StationTree() {
                   <thead>
                     <tr style={{ background: '#fafafa', borderBottom: '2px solid #f0f0f0' }}>
                       <th style={{ width: 40, padding: '8px 4px' }}></th>
-                      <th style={{ width: 50, padding: '8px 4px', textAlign: 'left' }}>#</th>
-                      <th style={{ width: 80, padding: '8px 4px', textAlign: 'left' }}>大工段</th>
-                      <th style={{ width: 90, padding: '8px 4px', textAlign: 'left' }}>小工段</th>
-                      <th style={{ width: 100, padding: '8px 4px', textAlign: 'left' }}>工站名称</th>
-                      <th style={{ width: 70, padding: '8px 4px', textAlign: 'left' }}>类型</th>
-                      <th style={{ width: 100, padding: '8px 4px', textAlign: 'left' }}>MES</th>
-                      <th style={{ width: 120, padding: '8px 4px', textAlign: 'left' }}>异常位置</th>
-                      <th style={{ width: 70, padding: '8px 4px', textAlign: 'left' }}>状态</th>
+                      <th style={{ width: 35, padding: '8px 4px', textAlign: 'left' }}>#</th>
+                      <th style={{ width: 70, padding: '8px 4px', textAlign: 'left' }}>大工段</th>
+                      <th style={{ width: 60, padding: '8px 4px', textAlign: 'left' }}>小工段</th>
+                      <th style={{ width: 80, padding: '8px 4px', textAlign: 'left' }}>工站名称</th>
+                      <th style={{ width: 60, padding: '8px 4px', textAlign: 'left' }}>类型</th>
+                      <th style={{ width: 90, padding: '8px 4px', textAlign: 'left' }}>MES</th>
+                      <th style={{ width: 100, padding: '8px 4px', textAlign: 'left' }}>异常位置</th>
+                      <th style={{ width: 50, padding: '8px 4px', textAlign: 'left' }}>状态</th>
                     </tr>
                   </thead>
                   <tbody>

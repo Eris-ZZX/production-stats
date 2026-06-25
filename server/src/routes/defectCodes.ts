@@ -55,7 +55,7 @@ router.put('/:id', requireConfigAuth, (req, res) => {
   if (!existing) { res.status(404).json({ error: '不存在' }); return; }
   db.prepare(
     `UPDATE ${ctx.table} SET defect_code=?, component=?, type=?, location=?, defect=?, is_active=? WHERE id=?`
-  ).run(r.defectCode, r.component, r.type, r.location, r.defect, r.isActive ? 1 : 0, req.params.id);
+  ).run(r.defectCode || existing.defect_code, r.component || existing.component, r.type || existing.type, r.location || existing.location, r.defect || existing.defect, r.isActive !== undefined ? (r.isActive ? 1 : 0) : existing.is_active, req.params.id);
   res.json({ ok: true });
 });
 
@@ -75,8 +75,7 @@ router.delete('/:id', requireConfigAuth, (req, res) => {
     used = db.prepare('SELECT 1 FROM station_detail_records WHERE defect_code = ? LIMIT 1').get(existing.defect_code);
   }
   if (used) {
-    db.prepare(`UPDATE ${ctx.table} SET is_active = 0 WHERE id = ?`).run(req.params.id);
-    res.json({ ok: true, deactivated: true, message: '该缺陷代码已被使用，已自动停用' });
+    res.json({ inUse: true, message: '该缺陷代码已被使用，无法删除' });
     return;
   }
   db.prepare(`DELETE FROM ${ctx.table} WHERE id = ?`).run(req.params.id);
