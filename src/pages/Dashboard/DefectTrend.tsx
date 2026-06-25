@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Card, DatePicker, Select, Typography, Space, Radio, Switch } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { dashboardApi, productLinesApi, defectCodesApi } from '../../api';
+import { useProduct } from '../../store/ProductContext';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 dayjs.extend(isoWeek);
@@ -46,6 +47,7 @@ function aggregateDefects(
 }
 
 export default function DefectTrend() {
+  const { currentProduct } = useProduct();
   const [dates, setDates] = useState<[string, string] | null>(() => { const saved = sessionStorage.getItem('dashboard-dates'); if (saved) { try { const p = JSON.parse(saved); if (p?.[0] && p?.[1]) return p; } catch {} } return [twoWeeksAgo, today]; });
   const [productIds, setProductIds] = useState<number[]>([]);
   const [skus, setSkus] = useState<any[]>([]);
@@ -62,12 +64,13 @@ export default function DefectTrend() {
 
   useEffect(() => {
     productLinesApi.listSkus().then((lines: any[]) => {
-      setSkus(lines);
-      const activeIds = lines.filter(p => p.isActive).map(p => p.id);
+      const mySkus = currentProduct ? lines.filter((s: any) => s.productLineId === currentProduct.id) : [];
+      setSkus(mySkus);
+      const activeIds = mySkus.filter((p: any) => p.isActive).map((p: any) => p.id);
       if (activeIds.length > 0) setProductIds(activeIds);
     });
     defectCodesApi.list().then(setDefectCodes).catch(() => {});
-  }, []);
+  }, [currentProduct]);
 
   useEffect(() => {
     if (productIds.length === 0) { setRawData({ dates: [], defects: [] }); return; }

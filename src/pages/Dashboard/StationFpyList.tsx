@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Card, Table, DatePicker, Select, Typography, Tag, Space, Collapse } from 'antd';
 import { dashboardApi, productLinesApi } from '../../api';
+import { useProduct } from '../../store/ProductContext';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 
@@ -15,6 +16,7 @@ interface StationFpyRow {
 }
 
 export default function StationFpyList() {
+  const { currentProduct } = useProduct();
   const [dates, setDates] = useState<[string, string] | null>(() => {
     const saved = sessionStorage.getItem('dashboard-dates');
     if (saved) { try { const p = JSON.parse(saved); if (p?.[0] && p?.[1]) return p; } catch {} }
@@ -26,11 +28,12 @@ export default function StationFpyList() {
 
   useEffect(() => {
     productLinesApi.listSkus().then((lines: any[]) => {
-      setSkus(lines);
-      const activeIds = lines.filter(p => p.isActive).map(p => p.id);
+      const mySkus = currentProduct ? lines.filter((s: any) => s.productLineId === currentProduct.id) : [];
+      setSkus(mySkus);
+      const activeIds = mySkus.filter(p => p.isActive).map(p => p.id);
       if (activeIds.length > 0) setProductIds(activeIds);
     });
-  }, []);
+  }, [currentProduct]);
 
   useEffect(() => {
     if (productIds.length === 0) { setAllData([]); return; }

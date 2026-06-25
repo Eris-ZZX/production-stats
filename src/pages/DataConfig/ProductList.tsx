@@ -61,7 +61,7 @@ export default function ProductList() {
   };
 
   const columns = [
-    { title: 'ID', dataIndex: 'id', key: 'id', width: 60, render: (v: number) => v === -1 ? <Tag>新</Tag> : v },
+    { title: '#', key: 'idx', width: 50, render: (_: unknown, __: unknown, i: number) => i + 1 },
     { title: '品号编码', dataIndex: 'code', key: 'code',
       render: (v: string, r: any) => isEditing(r.id)
         ? <Form.Item name="code" style={{ margin: 0 }} rules={[{ required: true }]}><Input size="small" style={{ width: 150 }} /></Form.Item>

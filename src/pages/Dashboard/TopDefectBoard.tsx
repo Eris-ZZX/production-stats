@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, Table, DatePicker, Select, Typography, Tag, Space, Popover } from 'antd';
 import { dashboardApi, productLinesApi, stationsApi } from '../../api';
+import { useProduct } from '../../store/ProductContext';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -45,6 +46,7 @@ const columns = [
 ];
 
 export default function TopDefectBoard() {
+  const { currentProduct } = useProduct();
   const [dates, setDates] = useState<[string, string] | null>(() => { const saved = sessionStorage.getItem('dashboard-dates'); if (saved) { try { const p = JSON.parse(saved); if (p?.[0] && p?.[1]) return p; } catch {} } return ['2026-06-01', '2026-06-03']; });  const [productIds, setProductIds] = useState<number[]>([]);
   const [skus, setSkus] = useState<any[]>([]);
   const [sections, setSections] = useState<string[]>([]);
@@ -53,11 +55,12 @@ export default function TopDefectBoard() {
   // 加载品号列表
   useEffect(() => {
     productLinesApi.listSkus().then((lines: any[]) => {
-      setSkus(lines);
-      const activeIds = lines.filter(p => p.isActive).map(p => p.id);
+      const mySkus = currentProduct ? lines.filter((s: any) => s.productLineId === currentProduct.id) : [];
+      setSkus(mySkus);
+      const activeIds = mySkus.filter(p => p.isActive).map(p => p.id);
       if (activeIds.length > 0) setProductIds(activeIds);
     });
-  }, []);
+  }, [currentProduct]);
 
   // 从工站数据中提取大工段列表
   useEffect(() => {
