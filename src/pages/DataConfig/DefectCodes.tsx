@@ -78,8 +78,12 @@ export default function DefectCodes() {
 
   const del = async (id: number) => {
     try {
-      await defectCodesApi.remove(id);
-      message.success('已删除');
+      const result: any = await defectCodesApi.remove(id);
+      if (result?.deactivated) {
+        message.warning(result.message || '该缺陷代码已被使用，已自动停用');
+      } else {
+        message.success('已删除');
+      }
       loadDefects();
     } catch (e: any) {
       message.error(e?.message || '删除失败');

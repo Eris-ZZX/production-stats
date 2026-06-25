@@ -138,10 +138,12 @@ export default function StationDetailEntry() {
       message.error('该日期+品号+工站+缺陷的记录已存在，不可重复录入'); return;
     }
     try {
+      const dc = activeDefects.find((d: DefectCode) => d.defectCode === values.defectCode);
       await stationDetailsApi.create({
         recordDate: date,
         productSkuId: values.productSkuId,
         stationId: values.stationId,
+        defectType: dc?.type || '',
         defectCode: values.defectCode,
         qty: values.qty,
       });
@@ -162,10 +164,12 @@ export default function StationDetailEntry() {
   const saveEdit = async (id: number) => {
     const values = await editForm.validateFields();
     try {
+      const edc = activeDefects.find((d: DefectCode) => d.defectCode === values.defectCode);
       await stationDetailsApi.update(id, {
         recordDate: values.recordDate.format('YYYY-MM-DD'),
         productSkuId: values.productSkuId,
         stationId: values.stationId,
+        defectType: edc?.type || '',
         defectCode: values.defectCode,
         qty: values.qty,
       });
@@ -409,7 +413,7 @@ export default function StationDetailEntry() {
       {/* 可编辑表格 */}
       <Card title={<span>已录入记录 ({filteredRecords2.length} 条) <SmartFilterBar fields={recFilterFields2} searchText={recSearch2} onSearchChange={setRecSearch2} conditions={recConditions2} onConditionsChange={setRecConditions2} /></span>}>
         <Form form={editForm} component={false}>
-          <Table scroll={{ x: 'max-content' }} dataSource={filteredRecords2.map((r, i) => ({ ...r, key: i }))} columns={getEditableColumns()} loading={loading} pagination={{ pageSize: 10, showTotal: t => `共 ${t} 条` }} size="small" />
+          <Table scroll={{ x: 'max-content' }} dataSource={filteredRecords2.map(r => ({ ...r, key: r.id }))} columns={getEditableColumns()} loading={loading} pagination={{ pageSize: 10, showTotal: t => `共 ${t} 条` }} size="small" />
         </Form>
       </Card>
 

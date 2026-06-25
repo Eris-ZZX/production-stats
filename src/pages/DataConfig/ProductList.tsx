@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Form, Input, Typography, Tag, message, Popconfirm, Space } from 'antd';
+import { Card, Table, Button, Form, Input, Switch, Typography, Tag, message, Popconfirm, Space } from 'antd';
 import { PlusOutlined, CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useProduct } from '../../store/ProductContext';
 import { productLinesApi } from '../../api';
@@ -54,8 +54,12 @@ export default function ProductList() {
 
   const del = async (id: number) => {
     try {
-      await productLinesApi.removeSku(id);
-      message.success('已删除');
+      const result: any = await productLinesApi.removeSku(id);
+      if (result?.deactivated) {
+        message.warning(result.message || '该品号已有记录，已自动停用');
+      } else {
+        message.success('已删除');
+      }
       loadData(); refresh();
     } catch (e: any) { message.error(e?.message || '删除失败'); }
   };
@@ -68,7 +72,7 @@ export default function ProductList() {
         : v },
     { title: '状态', dataIndex: 'isActive', key: 'st', width: 80,
       render: (v: boolean, r: any) => isEditing(r.id)
-        ? <Form.Item name="isActive" style={{ margin: 0 }} valuePropName="checked" />
+        ? <Form.Item name="isActive" style={{ margin: 0 }} valuePropName="checked"><Switch size="small" /></Form.Item>
         : <Tag color={v ? 'green' : 'default'}>{v ? '启用' : '停用'}</Tag> },
     { title: '操作', key: 'action', width: 160,
       render: (_: unknown, r: any) => isEditing(r.id)

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { signAdmin, signProduct } from '../auth.js';
-import { verifyPassword } from '../crypto.js';
+import { verifyPassword, hashPassword } from '../crypto.js';
 
 const router = Router();
 
@@ -12,6 +12,10 @@ router.post('/admin-login', (req, res) => {
   const acc = db.prepare('SELECT * FROM admin_accounts WHERE username = ? AND is_active = 1').get(username) as any;
   if (!acc || !verifyPassword(password, acc.password)) {
     res.status(401).json({ error: '账号或密码错误' }); return;
+  }
+  // Auto-migrate legacy SHA-256 to scrypt
+  if (!acc.password.includes(':')) {
+    db.prepare('UPDATE admin_accounts SET password = ? WHERE id = ?').run(hashPassword(password), acc.id);
   }
   const token = signAdmin(acc.username, acc.role);
   res.json({ token, role: acc.role, username: acc.username });
@@ -30,6 +34,11 @@ router.post('/product-login', (req, res) => {
   else if (pl.pwd_read && verifyPassword(password, pl.pwd_read)) role = 'read';
 
   if (!role) { res.status(401).json({ error: '密码错误' }); return; }
+  // Auto-migrate legacy SHA-256 to scrypt (check all three password fields)
+  const pwField = role === 'config' ? 'pwd_config' : role === 'entry' ? 'pwd_entry' : 'pwd_read';
+  if (pl[pwField] && !pl[pwField].includes(':')) {
+    db.prepare(`UPDATE product_lines SET ${pwField} = ? WHERE id = ?`).run(hashPassword(password), pl.id);
+  }
   const token = signProduct(pl.id, role, pl.name);
   res.json({ token, role, product: { id: pl.id, name: pl.name } });
 });

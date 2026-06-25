@@ -87,7 +87,7 @@ export default function TopDefectBoard() {
         if (dates?.[0]) params.startDate = dates[0];
         if (dates?.[1]) params.endDate = dates[1];
         if (k.defectType) params.defectType = k.defectType;
-        return dashboardApi.topDefects(params).then(data => [k.key, data] as [string, any[]]);
+        return dashboardApi.topDefects(params).then(data => [k.key, data] as [string, any[]]).catch(() => [k.key, []] as [string, any[]]);
       })
     ).then(results => {
       const map: Record<string, any[]> = {};
@@ -97,7 +97,7 @@ export default function TopDefectBoard() {
   }, [productIds, dates, sections]);
 
   const filterCard = (
-    <Card key="filter" style={{ marginBottom: 12 }} bodyStyle={{ padding: '12px 16px' }}>
+    <Card key="filter" style={{ marginBottom: 12 }} styles={{ body: { padding: '12px 16px' } }}>
       <Space wrap>
         <span>品号:</span>
         <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
@@ -134,7 +134,7 @@ export default function TopDefectBoard() {
             </div>
           }>
           <Table
-scroll={{ x: 'max-content' }}             dataSource={(defectData[`${t.key}-${activeTabs[t.key]}`] || []).map((d: any, i: number) => ({ ...d, key: i }))}
+scroll={{ x: 'max-content' }}             dataSource={(defectData[`${t.key}-${activeTabs[t.key]}`] || []).map((d: any) => ({ ...d, key: d.defectCode }))}
             columns={columns} pagination={false} size="small" />
         </Card>
       ))}
@@ -146,7 +146,7 @@ scroll={{ x: 'max-content' }}             dataSource={(defectData[`${t.key}-${ac
             </div>
           }>
           <Table
-scroll={{ x: 'max-content' }}             dataSource={(defectData[`FQC-${t.key}`] || []).map((d: any, i: number) => ({ ...d, key: i }))}
+scroll={{ x: 'max-content' }}             dataSource={(defectData[`FQC-${t.key}`] || []).map((d: any) => ({ ...d, key: `fqc-${d.defectCode}` }))}
             columns={columns} pagination={false} size="small" />
         </Card>
       ))}

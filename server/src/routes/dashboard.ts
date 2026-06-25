@@ -4,14 +4,29 @@ import { requireProduct } from '../auth.js';
 
 const router = Router();
 
-// helper: resolve SKU IDs from productId when skuIds not provided
+// helper: resolve SKU IDs from productId when skuIds not provided.
+// When skuIds are explicitly provided, validate they all belong to current product.
 function resolveSkuIds(skuIds: any, productId: number): number[] {
-  if (skuIds) return String(skuIds).split(',').map(Number);
+  if (skuIds) {
+    const ids = String(skuIds).split(',').map(Number).filter(n => n > 0);
+    if (ids.length === 0) return [];
+    // Validate all belong to current product
+    const placeholders = ids.map(() => '?').join(',');
+    const valid = db.prepare(
+      `SELECT id FROM product_skus WHERE id IN (${placeholders}) AND product_line_id = ?`
+    ).all(...ids, productId) as { id: number }[];
+    return valid.map(r => r.id);
+  }
   if (productId) {
     const rows = db.prepare('SELECT id FROM product_skus WHERE product_line_id = ?').all(productId) as { id: number }[];
     return rows.map(r => r.id);
   }
   return [];
+}
+
+// helper: get defects lookup table (product context → copy table, else → master)
+function defectTable(productId?: number): string {
+  return productId ? 'product_defect_codes' : 'defect_codes';
 }
 
 // ===== 工站 FPY =====
@@ -131,8 +146,12 @@ router.get('/section-fpy', requireProduct, (req, res) => {
   });
 
   const fieldsTable = productId ? 'product_station_fields' : 'station_field_options';
-  const fieldsWhere = productId ? `field_type = 'majorSection' AND product_line_id = ${productId}` : "field_type = 'majorSection'";
-  const fields = db.prepare(`SELECT * FROM ${fieldsTable} WHERE ${fieldsWhere}`).all() as any[];
+  const fieldsSql = productId
+    ? `SELECT * FROM ${fieldsTable} WHERE field_type = 'majorSection' AND product_line_id = ?`
+    : `SELECT * FROM ${fieldsTable} WHERE field_type = 'majorSection'`;
+  const fields = productId
+    ? (db.prepare(fieldsSql).all(productId) as any[])
+    : (db.prepare(fieldsSql).all() as any[]);
 
   const result = [...secMap.entries()].map(([name, d]) => {
     const targets = fields.find((f: any) => f.name === name);
@@ -238,10 +257,22 @@ router.get('/top-defects', requireProduct, (req, res) => {
   params.push(top);
 
   const rows = db.prepare(detailSql).all(...params) as any[];
-  const total = rows.reduce((s, r) => s + r.count, 0);
+
+  // Get true total defect count (all codes, not just top N)
+  let totalDefectSql = 'SELECT SUM(sr.qty) as total FROM station_detail_records sr JOIN stations s ON sr.station_id = s.id JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE 1=1';
+  totalDefectSql += filterSql;
+  const tParams: any[] = [];
+  if (section && section !== 'FQC') tParams.push(section);
+  else if (section === 'FQC') tParams.push('FQC');
+  if (pIds.length > 0) { totalDefectSql += ` AND ps.id IN (${pIds.map(() => '?').join(',')})`; tParams.push(...pIds); }
+  if (startDate) { totalDefectSql += ' AND sr.record_date >= ?'; tParams.push(startDate); }
+  if (endDate) { totalDefectSql += ' AND sr.record_date <= ?'; tParams.push(endDate); }
+  if (defectType) { totalDefectSql += ' AND sr.defect_type = ?'; tParams.push(defectType); }
+  const totalRow = db.prepare(totalDefectSql).get(...tParams) as { total: number } | undefined;
+  const trueTotal = totalRow?.total || 0;
 
   // Get stations per defect and max output
-  const defects = db.prepare('SELECT * FROM defect_codes').all() as any[];
+  const defects = db.prepare(`SELECT * FROM ${defectTable(productId)}`).all() as any[];
 
   // For output: get all production records in range
   let outputSql = 'SELECT pr.station_id, SUM(pr.output_qty) as total_output FROM production_records pr JOIN product_skus ps ON pr.product_sku_id = ps.id ';
@@ -298,7 +329,7 @@ router.get('/top-defects', requireProduct, (req, res) => {
       stations: stationNames,
       output: maxOutput,
       count: r.count,
-      rate: total > 0 ? +(r.count / total * 100).toFixed(1) : 0,
+      rate: trueTotal > 0 ? +(r.count / trueTotal * 100).toFixed(1) : 0,
       defectRate: maxOutput > 0 ? +(r.count / maxOutput * 100).toFixed(1) : 0,
     };
   });
@@ -344,8 +375,7 @@ router.get('/station-trend', requireProduct, (req, res) => {
       const output = prodMap.get(dk) || 0;
       const defects = detailMap.get(dk) || 0;
       if (output === 0 && defects === 0) return null;
-      const safe = Math.min(defects, output);
-      return output > 0 ? +(100 * (output - safe) / output).toFixed(1) : null;
+      return output > 0 ? +(100 * (output - defects) / output).toFixed(1) : null;
     });
     const hasData = data.some(v => v !== null);
     if (!hasData) return null;
@@ -391,8 +421,7 @@ router.get('/section-trend', requireProduct, (req, res) => {
       const output = prodMap.get(dk) || 0;
       const defects = detailMap.get(dk) || 0;
       if (output === 0 && defects === 0) return null;
-      const safe = Math.min(defects, output);
-      return output > 0 ? +(100 * (output - safe) / output).toFixed(1) : null;
+      return output > 0 ? +(100 * (output - defects) / output).toFixed(1) : null;
     });
     return { stationId: st.id, stationName: st.station_name, majorSection: st.major_section, data };
   });
@@ -446,8 +475,11 @@ router.get('/defect-trend', requireProduct, (req, res) => {
     detailSql += ' GROUP BY sr.record_date, sr.defect_code, s.major_section ORDER BY sr.record_date';
     const detailRows = db.prepare(detailSql).all(...dParams) as any[];
     const dates = [...new Set(detailRows.map((r: any) => r.record_date))].sort();
-    const defects = db.prepare('SELECT * FROM defect_codes').all() as any[];
+    const defects = db.prepare(`SELECT * FROM ${defectTable(productId)}`).all() as any[];
     // Build result: one line per (defect_code, major_section) combo
+    const defectMap = new Map(defects.map((d: any) => [d.defect_code, d]));
+    const detailLookup = new Map<string, number>();
+    detailRows.forEach((r: any) => detailLookup.set(`${r.record_date}|${r.defect_code}|${r.major_section}`, r.qty));
     const keySet = new Set<string>();
     const result: any[] = [];
     detailRows.forEach(r => {
@@ -455,12 +487,12 @@ router.get('/defect-trend', requireProduct, (req, res) => {
       if (!keySet.has(key)) { keySet.add(key); result.push({ defectCode: r.defect_code, section: r.major_section }); }
     });
     result.forEach(item => {
-      const d = defects.find((x: any) => x.defect_code === item.defectCode);
+      const d = defectMap.get(item.defectCode);
       item.defectName = d?.defect || item.defectCode;
       item.component = d?.component || '';
       item.type = d?.type || '';
       item.location = d?.location || '';
-      item.count = dates.map(date => { const row = detailRows.find((r: any) => r.record_date === date && r.defect_code === item.defectCode && r.major_section === item.section); return row ? row.qty : 0; });
+      item.count = dates.map(date => detailLookup.get(`${date}|${item.defectCode}|${item.section}`) || 0);
     });
     res.json({ dates, defects: result });
   } else {
@@ -474,13 +506,13 @@ router.get('/defect-trend', requireProduct, (req, res) => {
     detailSql += ' GROUP BY sr.record_date, sr.defect_code ORDER BY sr.record_date';
     const detailRows = db.prepare(detailSql).all(...dParams) as any[];
     const dates = [...new Set(detailRows.map((r: any) => r.record_date))].sort();
-    const defects = db.prepare('SELECT * FROM defect_codes').all() as any[];
+    const defects = db.prepare(`SELECT * FROM ${defectTable(productId)}`).all() as any[];
+    const defectMap = new Map(defects.map((d: any) => [d.defect_code, d]));
+    const detailLookup = new Map<string, number>();
+    detailRows.forEach((r: any) => detailLookup.set(`${r.record_date}|${r.defect_code}`, r.qty));
     const result = topCodes.map(code => {
-      const d = defects.find((x: any) => x.defect_code === code);
-      const countData = dates.map(date => {
-        const row = detailRows.find((r: any) => r.record_date === date && r.defect_code === code);
-        return row ? row.qty : 0;
-      });
+      const d = defectMap.get(code);
+      const countData = dates.map(date => detailLookup.get(`${date}|${code}`) || 0);
       return { defectCode: code, defectName: d?.defect || code, component: d?.component || '', type: d?.type || '', location: d?.location || '', count: countData };
     });
     res.json({ dates, defects: result });

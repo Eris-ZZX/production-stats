@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import type { ProductRole } from '../types';
 import { productLinesApi } from '../api';
-import { getProductAuths, addProductAuth, clearProductAuth } from '../api/client';
+import { getProductAuths, addProductAuth, clearProductAuth, clearProductToken } from '../api/client';
 
 interface ProductSku {
   id: number; productLineId: number; productName?: string; code: string; isActive: boolean;
@@ -58,6 +58,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
 
   const logoutProduct = useCallback(() => {
     if (currentProduct) clearProductAuth(currentProduct.id);
+    clearProductToken();
     setCurrentProduct(null);
     setCurrentRole(null);
   }, [currentProduct]);

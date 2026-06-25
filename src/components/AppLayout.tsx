@@ -57,6 +57,9 @@ export default function AppLayout() {
   const location = useLocation();
   const { currentProduct, currentRole, logoutProduct } = useProduct();
   const [collapsed, setCollapsed] = useState(false);
+  const [menuOpenKeys, setMenuOpenKeys] = useState<string[]>(() =>
+    [(location.pathname.split('/')[2] || 'dashboard')]
+  );
 
   // Protect: redirect to login if not authenticated
   useEffect(() => {
@@ -67,8 +70,13 @@ export default function AppLayout() {
     ...m, children: m.children,
   }));
 
-  const openKeys = [(location.pathname.split('/')[2] || 'dashboard')];
   const selectedKeys = [location.pathname];
+
+  // Sync openKeys when route changes
+  useEffect(() => {
+    const section = location.pathname.split('/')[2] || 'dashboard';
+    setMenuOpenKeys(prev => prev.includes(section) ? prev : [...prev, section]);
+  }, [location.pathname]);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -97,7 +105,8 @@ export default function AppLayout() {
               borderBottom: '1px solid #f0f0f0', textAlign: 'right' }}>
             {collapsed ? '»' : '«'}
           </div>
-          <Menu mode="inline" selectedKeys={selectedKeys} defaultOpenKeys={openKeys}
+          <Menu mode="inline" selectedKeys={selectedKeys} openKeys={menuOpenKeys}
+            onOpenChange={setMenuOpenKeys}
             items={menuItems} onClick={({ key }) => navigate(key)}
             style={{ borderRight: 0, marginTop: 4 }} />
         </Sider>

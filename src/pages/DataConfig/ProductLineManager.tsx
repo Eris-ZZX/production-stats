@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Form, Input, Typography, Tag, message, Popconfirm, Space } from 'antd';
+import { Card, Table, Button, Form, Input, Switch, Typography, Tag, message, Popconfirm, Space } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { productLinesApi } from '../../api';
 import type { ProductLine, AdminRole } from '../../types';
@@ -87,7 +87,7 @@ export default function ProductLineManager() {
         : <Tag color="blue">{r.name}</Tag> },
     { title: '状态', dataIndex: 'isActive', key: 'st', width: 60,
       render: (v: boolean, r: ProductLine) => isEditing(r.id)
-        ? <Form.Item name="isActive" style={{ margin: 0 }} valuePropName="checked" />
+        ? <Form.Item name="isActive" style={{ margin: 0 }} valuePropName="checked"><Switch size="small" /></Form.Item>
         : <Tag color={v ? 'green' : 'default'}>{v ? '启用' : '停用'}</Tag> },
     pwdCol('pwdRead'),
     pwdCol('pwdEntry'),

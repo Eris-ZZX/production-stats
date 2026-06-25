@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireProduct } from '../auth.js';
+import { requireProduct, requireProductWrite } from '../auth.js';
 
 const router = Router();
 
@@ -24,7 +24,7 @@ router.get('/', requireProduct, (req, res) => {
   })));
 });
 
-router.post('/', requireProduct, (req, res) => {
+router.post('/', requireProductWrite, (req, res) => {
   const productId = (req as any).productId;
   const { recordDate, stationId, defectType, defectCode, qty, productSkuId } = req.body;
   if (!recordDate || !stationId || !defectCode || !qty || !productSkuId) { res.status(400).json({ error: '参数不完整' }); return; }
@@ -35,23 +35,47 @@ router.post('/', requireProduct, (req, res) => {
   res.json({ id: result.lastInsertRowid });
 });
 
-router.post('/batch', requireProduct, (req, res) => {
+router.post('/batch', requireProductWrite, (req, res) => {
   const productId = (req as any).productId;
   const { records } = req.body;
   if (!records || !records.length) { res.status(400).json({ error: '无记录' }); return; }
 
+  // Batch1: validate all SKU ownerships at once
+  const skuIds = [...new Set(records.map((r: any) => r.productSkuId))];
+  const placeholders = skuIds.map(() => '?').join(',');
+  const validSkus = new Set(
+    (db.prepare(`SELECT id FROM product_skus WHERE id IN (${placeholders}) AND product_line_id = ?`).all(...skuIds, productId) as { id: number }[])
+      .map(r => r.id)
+  );
   const ownershipErrors: string[] = [];
-  const duplicates: string[] = [];
   const seen = new Set<string>();
+  const duplicates: string[] = [];
 
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
-    if (!validateSkuOwnership(r.productSkuId, productId)) { ownershipErrors.push(`第${i + 1}条: 品号不属于当前产品`); continue; }
+    if (!validSkus.has(r.productSkuId)) { ownershipErrors.push(`第${i + 1}条: 品号不属于当前产品`); continue; }
     const key = `${r.productSkuId}|${r.recordDate}|${r.stationId}|${r.defectCode}`;
     if (seen.has(key)) { duplicates.push(`第${i + 1}条: 批次内重复`); continue; }
     seen.add(key);
-    const dup = db.prepare('SELECT id FROM station_detail_records WHERE product_sku_id=? AND record_date=? AND station_id=? AND defect_code=?').get(r.productSkuId, r.recordDate, r.stationId, r.defectCode);
-    if (dup) { duplicates.push(`第${i + 1}条: 已存在`); }
+  }
+
+  // Batch2: check DB duplicates at once via compound VALUES
+  if (duplicates.length === 0 && ownershipErrors.length === 0) {
+    const seenInDb = new Set<string>();
+    const BATCH = 500;
+    for (let offset = 0; offset < records.length; offset += BATCH) {
+      const chunk = records.slice(offset, offset + BATCH);
+      const vals = chunk.map((r: any) => `(${r.productSkuId},'${r.recordDate}',${r.stationId},'${String(r.defectCode).replace(/'/g, "''")}')`).join(',');
+      const chipDups = db.prepare(`SELECT product_sku_id, record_date, station_id, defect_code FROM station_detail_records WHERE (product_sku_id, record_date, station_id, defect_code) IN (VALUES ${vals})`).all() as any[];
+      chipDups.forEach((d: any) => seenInDb.add(`${d.product_sku_id}|${d.record_date}|${d.station_id}|${d.defect_code}`));
+    }
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      const key = `${r.productSkuId}|${r.recordDate}|${r.stationId}|${r.defectCode}`;
+      if (seenInDb.has(key) && !duplicates.some(d => d.includes(`第${i + 1}条`))) {
+        duplicates.push(`第${i + 1}条: 已存在`);
+      }
+    }
   }
 
   if (ownershipErrors.length > 0) { res.status(403).json({ error: ownershipErrors.join('; ') }); return; }
@@ -62,15 +86,22 @@ router.post('/batch', requireProduct, (req, res) => {
   res.json({ ok: true, count: records.length });
 });
 
-router.put('/:id', requireProduct, (req, res) => {
+router.put('/:id', requireProductWrite, (req, res) => {
   const productId = (req as any).productId;
+  const existing = db.prepare('SELECT sr.product_sku_id, ps.product_line_id FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE sr.id = ?').get(req.params.id) as any;
+  if (!existing) { res.status(404).json({ error: '记录不存在' }); return; }
+  if (existing.product_line_id !== productId) { res.status(403).json({ error: '无权操作其他产品的记录' }); return; }
   const { recordDate, stationId, defectType, defectCode, qty, productSkuId } = req.body;
   if (productSkuId && !validateSkuOwnership(productSkuId, productId)) { res.status(403).json({ error: '品号不属于当前产品' }); return; }
   db.prepare('UPDATE station_detail_records SET product_sku_id=?, record_date=?, station_id=?, defect_type=?, defect_code=?, qty=? WHERE id=?').run(productSkuId, recordDate, stationId, defectType || '', defectCode, qty, req.params.id);
   res.json({ ok: true });
 });
 
-router.delete('/:id', requireProduct, (req, res) => {
+router.delete('/:id', requireProductWrite, (req, res) => {
+  const productId = (req as any).productId;
+  const existing = db.prepare('SELECT sr.product_sku_id, ps.product_line_id FROM station_detail_records sr JOIN product_skus ps ON sr.product_sku_id = ps.id WHERE sr.id = ?').get(req.params.id) as any;
+  if (!existing) { res.status(404).json({ error: '记录不存在' }); return; }
+  if (existing.product_line_id !== productId) { res.status(403).json({ error: '无权操作其他产品的记录' }); return; }
   db.prepare('DELETE FROM station_detail_records WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });

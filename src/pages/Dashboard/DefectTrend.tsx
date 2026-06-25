@@ -78,8 +78,7 @@ export default function DefectTrend() {
     const params: any = { skuIds: productIds.join(','), topN: 15, bySection: bySection ? '1' : '0' };
     if (startDate) params.startDate = startDate;
     if (dates?.[1]) params.endDate = dates[1];
-    dashboardApi.defectTrend(params).then(data => setRawData(data));
-  }, [productIds, dates, granularity, bySection]);
+    dashboardApi.defectTrend(params).then(data => setRawData(data)).catch(() => {});  }, [productIds, dates, granularity, bySection]);
 
   // 逐级过滤选项（基于实际缺陷代码库，而非趋势数据）
   const componentOptions = useMemo(() =>
@@ -147,7 +146,7 @@ export default function DefectTrend() {
   return (
     <div>
       <Title level={4}>缺陷趋势图</Title>
-      <Card style={{ marginBottom: 12 }} bodyStyle={{ padding: '12px 16px' }}>
+      <Card style={{ marginBottom: 12 }} styles={{ body: { padding: '12px 16px' } }}>
         <Space wrap>
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}

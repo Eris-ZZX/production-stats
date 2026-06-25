@@ -1,7 +1,10 @@
 import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'production-stats-secret-key-2026';
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+  console.warn('[!] JWT_SECRET 环境变量未设置，使用不安全默认值。生产环境请设置 JWT_SECRET。');
+  return 'production-stats-secret-key-2026';
+})();
 
 export interface AdminPayload {
   sub: string;
@@ -68,6 +71,25 @@ export function requireProductConfig(req: Request, res: Response, next: NextFunc
     if (role !== 'config') { res.status(403).json({ error: '需要配置管理权限' }); return; }
     next();
   });
+}
+
+/** 跨域配置认证：admin 任意角色 或 product config 角色 */
+export function requireConfigAuth(req: Request, res: Response, next: NextFunction) {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) { res.status(401).json({ error: '未登录' }); return; }
+  const payload = verifyToken(auth.slice(7));
+  if (!payload) { res.status(403).json({ error: '权限不足' }); return; }
+  if (payload.type === 'admin') {
+    (req as any).adminRole = (payload as AdminPayload).role;
+    (req as any).adminUser = (payload as AdminPayload).sub;
+    next();
+  } else if (payload.type === 'product' && (payload as ProductPayload).role === 'config') {
+    (req as any).productRole = (payload as ProductPayload).role;
+    (req as any).productId = (payload as ProductPayload).productId;
+    next();
+  } else {
+    res.status(403).json({ error: '需要配置管理权限' }); return;
+  }
 }
 
 export function requireAnyAuth(req: Request, res: Response, next: NextFunction) {

@@ -21,7 +21,7 @@ router.post('/', requireAdmin, (req, res) => {
     res.json({ id: result.lastInsertRowid });
   } catch (e: any) {
     if (e.message?.includes('UNIQUE')) res.status(409).json({ error: '账号已存在' });
-    else { res.status(500).json({ error: e.message }); }
+    else { console.error('adminAccounts POST error:', e); res.status(500).json({ error: '操作失败' }); }
   }
 });
 

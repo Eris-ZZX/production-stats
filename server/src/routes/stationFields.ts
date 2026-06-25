@@ -1,18 +1,24 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireAnyAuth } from '../auth.js';
+import { requireAnyAuth, requireConfigAuth } from '../auth.js';
 
 const router = Router();
 
 function getCtx(req: any) {
-  if (req.adminRole) return { type: 'admin', table: 'station_field_options', extraCols: '' };
-  if (req.productId) return { type: 'product', table: 'product_station_fields', extraCols: ` WHERE product_line_id = ${req.productId}` };
-  return { type: 'admin', table: 'station_field_options', extraCols: '' };
+  if (req.adminRole) return { type: 'admin', table: 'station_field_options' };
+  if (req.productId) return { type: 'product', table: 'product_station_fields' };
+  return { type: 'admin', table: 'station_field_options' };
 }
 
 router.get('/', requireAnyAuth, (req, res) => {
   const ctx = getCtx(req);
-  const rows = db.prepare(`SELECT * FROM ${ctx.table}${ctx.extraCols} ORDER BY sort_order, id`).all();
+  const pid = (req as any).productId;
+  let rows: any[];
+  if (ctx.type === 'admin') {
+    rows = db.prepare(`SELECT * FROM ${ctx.table} ORDER BY sort_order, id`).all();
+  } else {
+    rows = db.prepare(`SELECT * FROM ${ctx.table} WHERE product_line_id = ? ORDER BY sort_order, id`).all(pid);
+  }
   res.json((rows as any[]).map(r => ({
     id: r.id, fieldType: r.field_type, name: r.name, sortOrder: r.sort_order ?? 0,
     isDataEntry: r.is_data_entry === null ? undefined : !!r.is_data_entry,
@@ -20,26 +26,33 @@ router.get('/', requireAnyAuth, (req, res) => {
   })));
 });
 
-router.post('/', requireAnyAuth, (req, res) => {
+router.post('/', requireConfigAuth, (req, res) => {
   const ctx = getCtx(req);
   const r = req.body;
+  const pid = (req as any).productId;
   if (ctx.type === 'product') {
     const result = db.prepare(
       `INSERT OR IGNORE INTO ${ctx.table} (product_line_id, field_type, name, is_data_entry, visual_fpy_target, functional_fpy_target, air_leak_fpy_target, sort_order) VALUES (?,?,?,?,?,?,?, COALESCE((SELECT MAX(sort_order)+1 FROM ${ctx.table} WHERE product_line_id=? AND field_type=?), 1))`
-    ).run(req.productId, r.fieldType, r.name, r.isDataEntry === undefined ? null : (r.isDataEntry ? 1 : 0), r.visualFpyTarget ?? null, r.functionalFpyTarget ?? null, r.airLeakFpyTarget ?? null, req.productId, r.fieldType);
+    ).run(pid, r.fieldType, r.name, r.isDataEntry === undefined ? null : (r.isDataEntry ? 1 : 0), r.visualFpyTarget ?? null, r.functionalFpyTarget ?? null, r.airLeakFpyTarget ?? null, pid, r.fieldType);
+    if (result.changes === 0) { res.status(409).json({ error: '该选项已存在' }); return; }
     res.json({ id: result.lastInsertRowid });
   } else {
     const result = db.prepare(
       `INSERT OR IGNORE INTO ${ctx.table} (field_type, name, is_data_entry, visual_fpy_target, functional_fpy_target, air_leak_fpy_target, sort_order) VALUES (?,?,?,?,?,?, COALESCE((SELECT MAX(sort_order)+1 FROM ${ctx.table} WHERE field_type=?), 1))`
     ).run(r.fieldType, r.name, r.isDataEntry === undefined ? null : (r.isDataEntry ? 1 : 0), r.visualFpyTarget ?? null, r.functionalFpyTarget ?? null, r.airLeakFpyTarget ?? null, r.fieldType);
+    if (result.changes === 0) { res.status(409).json({ error: '该选项已存在' }); return; }
     res.json({ id: result.lastInsertRowid });
   }
 });
 
-router.put('/:id', requireAnyAuth, (req, res) => {
+router.put('/:id', requireConfigAuth, (req, res) => {
   const ctx = getCtx(req);
   const r = req.body;
-  const existing = db.prepare(`SELECT * FROM ${ctx.table} WHERE id=?`).get(req.params.id) as any;
+  const pid = (req as any).productId;
+  // Verify record exists and (if product context) belongs to current product
+  const whereClause = ctx.type === 'product' ? 'id=? AND product_line_id=?' : 'id=?';
+  const whereParams: any[] = ctx.type === 'product' ? [req.params.id, pid] : [req.params.id];
+  const existing = db.prepare(`SELECT * FROM ${ctx.table} WHERE ${whereClause}`).get(...whereParams) as any;
   if (!existing) { res.status(404).json({ error: '不存在' }); return; }
   db.prepare(
     `UPDATE ${ctx.table} SET field_type=?, name=?, is_data_entry=?, visual_fpy_target=?, functional_fpy_target=?, air_leak_fpy_target=?, sort_order=? WHERE id=?`
@@ -47,9 +60,14 @@ router.put('/:id', requireAnyAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id', requireAnyAuth, (req, res) => {
+router.delete('/:id', requireConfigAuth, (req, res) => {
   const ctx = getCtx(req);
-  db.prepare(`DELETE FROM ${ctx.table} WHERE id = ?`).run(req.params.id);
+  const pid = (req as any).productId;
+  if (ctx.type === 'product') {
+    db.prepare(`DELETE FROM ${ctx.table} WHERE id = ? AND product_line_id = ?`).run(req.params.id, pid);
+  } else {
+    db.prepare(`DELETE FROM ${ctx.table} WHERE id = ?`).run(req.params.id);
+  }
   res.json({ ok: true });
 });
 

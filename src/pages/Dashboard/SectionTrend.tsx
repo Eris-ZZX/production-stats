@@ -100,8 +100,7 @@ export default function SectionTrend() {
     if (startDate) params.startDate = startDate;
     if (dates?.[1]) params.endDate = dates[1];
     if (defectType) params.defectType = defectType;
-    dashboardApi.sectionTrend(params).then(data => setRawData(data));
-  }, [productIds, dates, defectType, granularity]);
+    dashboardApi.sectionTrend(params).then(data => setRawData(data)).catch(() => {});  }, [productIds, dates, defectType]);
 
   const data = useMemo(() => aggregateSections(rawData.dates, rawData.sections, granularity),
     [rawData, granularity]);
@@ -127,7 +126,7 @@ export default function SectionTrend() {
       },
       legend: { bottom: 0, data: filteredSections.map(s => s.sectionName) },
       grid: { left: 60, right: 30, top: 20, bottom: 50 },
-      xAxis: { type: 'category', data: rawData.dates, boundaryGap: false },
+      xAxis: { type: 'category', data: data.dates, boundaryGap: false },
       yAxis: { type: 'value', name: 'FPY(%)', min: (val: { min: number }) => Math.floor(Math.min(val.min, 90) / 5) * 5, max: 100 },
       series: filteredSections.map((s, idx) => ({
         name: s.sectionName,
@@ -146,7 +145,7 @@ export default function SectionTrend() {
   return (
     <div>
       <Title level={4}>工段趋势图</Title>
-      <Card style={{ marginBottom: 12 }} bodyStyle={{ padding: '12px 16px' }}>
+      <Card style={{ marginBottom: 12 }} styles={{ body: { padding: '12px 16px' } }}>
         <Space wrap>
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
@@ -172,7 +171,7 @@ export default function SectionTrend() {
         </Space>
       </Card>
       <Card>
-        <ReactECharts option={chartOption} style={{ height: 450 }} notMerge />
+        <ReactECharts key={granularity} option={chartOption} style={{ height: 450 }} notMerge />
       </Card>
     </div>
   );

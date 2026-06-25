@@ -40,8 +40,7 @@ export default function StationFpyList() {
     const params: any = { skuIds: productIds.join(',') };
     if (dates?.[0]) params.startDate = dates[0];
     if (dates?.[1]) params.endDate = dates[1];
-    dashboardApi.stationFpy(params).then(data => setAllData(data));
-  }, [productIds, dates]);
+    dashboardApi.stationFpy(params).then(data => setAllData(data)).catch(() => {});  }, [productIds, dates]);
 
   // 按大工段分组（FQC 单独一组在最后）
   const sectionGroups = useMemo(() => {
@@ -83,7 +82,7 @@ export default function StationFpyList() {
   return (
     <div>
       <Title level={4}>工站 FPY 列表</Title>
-      <Card style={{ marginBottom: 12 }} bodyStyle={{ padding: '12px 16px' }}>
+      <Card style={{ marginBottom: 12 }} styles={{ body: { padding: '12px 16px' } }}>
         <Space wrap>
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
@@ -113,7 +112,7 @@ export default function StationFpyList() {
               extra={<Tag color="default">折叠/展开</Tag>}
             >
               <Table
-scroll={{ x: 'max-content' }}                 dataSource={items.map((d, i) => ({ ...d, key: i }))}
+scroll={{ x: 'max-content' }}                 dataSource={items.map(d => ({ ...d, key: `${d.stationId}-${d.majorSection}` }))}
                 columns={columns}
                 pagination={false}
                 size="small"

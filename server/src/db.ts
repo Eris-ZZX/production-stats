@@ -1,10 +1,14 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { hashPassword } from './crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, '..', 'data', 'app.db');
+
+// Ensure data directory exists
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new Database(DB_PATH);
 
@@ -14,7 +18,7 @@ db.pragma('foreign_keys = ON');
 export function initDB() {
   // Add sort_order column to existing tables (safe migration)
   for (const table of ['station_field_options', 'product_station_fields']) {
-    try { db.exec(`ALTER TABLE ${table} ADD COLUMN sort_order INTEGER DEFAULT 0`); } catch {}
+    try { db.exec(`ALTER TABLE ${table} ADD COLUMN sort_order INTEGER DEFAULT 0`); } catch (e) { console.warn(`Migration skip: ${table}.sort_order -`, (e as any)?.message); }
   }
 
   db.exec(`
@@ -60,7 +64,7 @@ export function initDB() {
       is_active INTEGER DEFAULT 1
     );
 
-    -- ===== 缺陷代码 =====
+    -- ===== 缺陷代码（主模板，后台管理维护） =====
     CREATE TABLE IF NOT EXISTS defect_codes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       defect_code TEXT NOT NULL UNIQUE,
@@ -69,6 +73,19 @@ export function initDB() {
       location TEXT NOT NULL,
       defect TEXT NOT NULL,
       is_active INTEGER DEFAULT 1
+    );
+
+    -- ===== 缺陷代码（按产品复制，产品数据界面使用） =====
+    CREATE TABLE IF NOT EXISTS product_defect_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_line_id INTEGER NOT NULL REFERENCES product_lines(id) ON DELETE CASCADE,
+      defect_code TEXT NOT NULL,
+      component TEXT NOT NULL,
+      type TEXT NOT NULL,
+      location TEXT NOT NULL,
+      defect TEXT NOT NULL,
+      is_active INTEGER DEFAULT 1,
+      UNIQUE(product_line_id, defect_code)
     );
 
     -- ===== 缺陷字段选项（主模板，后台管理维护） =====
@@ -148,9 +165,31 @@ export function initDB() {
       production_defects TEXT DEFAULT '[]',
       fqc_defects TEXT DEFAULT '[]',
       inspection_date TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      UNIQUE(product_sku_id, inspection_date, product_sn, major_section)
     );
   `);
+
+  // Add performance indexes (safe to re-run)
+  for (const idx of [
+    'CREATE INDEX IF NOT EXISTS idx_production_records_station ON production_records(station_id)',
+    'CREATE INDEX IF NOT EXISTS idx_production_records_date ON production_records(record_date)',
+    'CREATE INDEX IF NOT EXISTS idx_station_detail_station ON station_detail_records(station_id)',
+    'CREATE INDEX IF NOT EXISTS idx_station_detail_date ON station_detail_records(record_date)',
+    'CREATE INDEX IF NOT EXISTS idx_station_detail_defect ON station_detail_records(defect_code)',
+    'CREATE INDEX IF NOT EXISTS idx_product_skus_line ON product_skus(product_line_id)',
+  ]) {
+    try { db.exec(idx); } catch (e) { console.warn(`Index skip: -`, (e as any)?.message); }
+  }
+
+  // Migrate: copy master defect_codes to product_defect_codes for existing products
+  const productIds = db.prepare('SELECT id FROM product_lines').all() as { id: number }[];
+  for (const { id } of productIds) {
+    const hasCodes = db.prepare('SELECT COUNT(*) as c FROM product_defect_codes WHERE product_line_id = ?').get(id) as { c: number };
+    if (hasCodes.c === 0) {
+      db.prepare('INSERT OR IGNORE INTO product_defect_codes (product_line_id, defect_code, component, type, location, defect, is_active) SELECT ?, defect_code, component, type, location, defect, is_active FROM defect_codes').run(id);
+    }
+  }
 
   seedData();
 }

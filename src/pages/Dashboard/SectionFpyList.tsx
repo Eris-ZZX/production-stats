@@ -44,9 +44,8 @@ export default function SectionFpyList() {
     const params: any = { skuIds: productIds.join(',') };
     if (dates?.[0]) params.startDate = dates[0];
     if (dates?.[1]) params.endDate = dates[1];
-    dashboardApi.sectionFpy(params).then(d => setData(d));
-    dashboardApi.fqcFpy(params).then(d => setFqcData(d));
-  }, [productIds, dates]);
+    dashboardApi.sectionFpy(params).then(d => setData(d)).catch(() => {});
+    dashboardApi.fqcFpy(params).then(d => setFqcData(d)).catch(() => {});  }, [productIds, dates]);
 
   const table = (title: string, fpyKey: keyof SectionRow, targetKey: keyof SectionRow) => {
     const cols: ColumnsType<SectionRow> = [
@@ -71,7 +70,7 @@ export default function SectionFpyList() {
     ];
     return (
       <Card key={title} title={title} style={{ flex: 1, minWidth: 0 }}>
-        <Table scroll={{ x: 'max-content' }} dataSource={data.map((d, i) => ({ ...d, key: i }))} columns={cols} pagination={false} size="small" />
+        <Table scroll={{ x: 'max-content' }} dataSource={data.map(d => ({ ...d, key: d.majorSection }))} columns={cols} pagination={false} size="small" />
       </Card>
     );
   };
@@ -99,7 +98,7 @@ export default function SectionFpyList() {
     ];
     return (
       <Card key={title} title={title} style={{ flex: 1, minWidth: 0 }}>
-        <Table scroll={{ x: 'max-content' }} dataSource={fqcData.map((d, i) => ({ ...d, key: i }))} columns={cols} pagination={false} size="small" />
+        <Table scroll={{ x: 'max-content' }} dataSource={fqcData.map(d => ({ ...d, key: `fqc-${d.majorSection}` }))} columns={cols} pagination={false} size="small" />
       </Card>
     );
   };
@@ -107,7 +106,7 @@ export default function SectionFpyList() {
   return (
     <div>
       <Title level={4}>工段 FPY 列表</Title>
-      <Card style={{ marginBottom: 12 }} bodyStyle={{ padding: '12px 16px' }}>
+      <Card style={{ marginBottom: 12 }} styles={{ body: { padding: '12px 16px' } }}>
         <Space wrap>
           <span>品号:</span>
           <Select mode="multiple" size="small" style={{ minWidth: 200 }} value={productIds}
